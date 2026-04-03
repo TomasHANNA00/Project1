@@ -1,28 +1,29 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/app/contexts/AuthContext";
 
 export default function DashboardPage() {
-  const { user, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
+  const router = useRouter();
 
-  if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-zinc-500">Loading…</p>
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (loading) return;
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+    if (profile?.role === "admin") {
+      router.replace("/dashboard/admin");
+    } else {
+      router.replace("/dashboard/onboarding");
+    }
+  }, [user, profile, loading, router]);
 
   return (
-    <div>
-      <h1 className="mb-4 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-        Dashboard
-      </h1>
-      <div className="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <p className="text-zinc-600 dark:text-zinc-400">
-          You are logged in as <strong>{user?.email}</strong>.
-        </p>
-      </div>
+    <div className="flex h-full items-center justify-center">
+      <p className="text-sm text-zinc-500">Cargando...</p>
     </div>
   );
 }
