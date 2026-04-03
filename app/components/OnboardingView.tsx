@@ -48,21 +48,27 @@ export default function OnboardingView({ clientId, isAdmin, clientName }: Props)
       setLoading(true);
       setError(null);
       try {
-        // Fetch parts + sections
+        // Fetch parts and sections as separate queries to avoid relying on
+        // PostgREST foreign-key relationship resolution, which can fail on
+        // cold schema cache in production.
         const { data: partsData, error: partsErr } = await supabase
           .from("onboarding_parts")
-          .select("*, onboarding_sections(*)");
+          .select("*")
+          .order("part_number");
         if (partsErr) throw partsErr;
 
-        const sorted = (partsData ?? [])
-          .sort((a, b) => a.part_number - b.part_number)
-          .map((p) => ({
-            ...p,
-            sections: (p.onboarding_sections ?? []).sort(
-              (a: { section_order: number }, b: { section_order: number }) =>
-                a.section_order - b.section_order
-            ),
-          }));
+        const { data: sectionsData, error: sectionsErr } = await supabase
+          .from("onboarding_sections")
+          .select("*")
+          .order("section_order");
+        if (sectionsErr) throw sectionsErr;
+
+        const sorted = (partsData ?? []).map((p) => ({
+          ...p,
+          sections: (sectionsData ?? [])
+            .filter((s) => s.part_id === p.id)
+            .sort((a, b) => a.section_order - b.section_order),
+        }));
         setParts(sorted);
 
         // Fetch submissions for this client
