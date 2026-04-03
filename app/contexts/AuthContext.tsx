@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import type { Profile } from "@/lib/types";
@@ -26,40 +26,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const mounted = useRef(true);
 
   const fetchProfile = async (userId: string) => {
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", userId)
-      .single();
-    setProfile(data ?? null);
+    try {
+      const { data } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", userId)
+        .single();
+      if (mounted.current) setProfile(data ?? null);
+    } catch {
+      if (mounted.current) setProfile(null);
+    }
   };
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        await fetchProfile(session.user.id);
-      }
-      setLoading(false);
-    });
+    mounted.current = true;
 
+    // Safety timeout: if Supabase never responds (bad env vars in production,
+    // network issue, etc.), release the loading gate after 5 s.
+    const timeout = setTimeout(() => {
+      if (mounted.current) setLoading(false);
+    }, 5000);
+
+    // onAuthStateChange is the single source of truth.
+    // It fires immediately with INITIAL_SESSION on subscribe (Supabase v2),
+    // so we don't also need getSession().
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!mounted.current) return;
       setSession(session);
       setUser(session?.user ?? null);
+
       if (session?.user) {
         await fetchProfile(session.user.id);
       } else {
-        setProfile(null);
+        if (mounted.current) setProfile(null);
       }
-      setLoading(false);
+
+      if (mounted.current) {
+        clearTimeout(timeout);
+        setLoading(false);
+      }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted.current = false;
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signOut = async () => {
