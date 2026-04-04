@@ -21,65 +21,102 @@ function formatDate(dateStr: string | null): string {
   });
 }
 
+interface InviteForm {
+  email: string;
+  full_name: string;
+  company_name: string;
+}
+
 export default function AdminClientsPage() {
-  const { user, profile, loading: authLoading } = useAuth();
+  const { user, session, profile, loading: authLoading } = useAuth();
   const router = useRouter();
   const [clients, setClients] = useState<ClientRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Invite modal
+  const [showInvite, setShowInvite] = useState(false);
+  const [inviteForm, setInviteForm] = useState<InviteForm>({ email: "", full_name: "", company_name: "" });
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
     if (!authLoading && profile?.role !== "admin") router.replace("/dashboard/onboarding");
   }, [user, profile, authLoading, router]);
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        // Fetch all client profiles
-        const { data: profilesData, error: profilesErr } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("role", "client")
-          .order("created_at", { ascending: false });
-        if (profilesErr) throw profilesErr;
+  const loadClients = async () => {
+    setLoading(true);
+    try {
+      const { data: profilesData, error: profilesErr } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("role", "client")
+        .order("created_at", { ascending: false });
+      if (profilesErr) throw profilesErr;
 
-        // Fetch submissions to compute progress + last activity
-        const { data: subsData } = await supabase
-          .from("submissions")
-          .select("client_id, updated_at, text_content");
+      const { data: subsData } = await supabase
+        .from("submissions")
+        .select("client_id, updated_at, text_content");
 
-        const subsByClient: Record<
-          string,
-          { count: number; lastActivity: string }
-        > = {};
-        for (const sub of subsData ?? []) {
-          if (!subsByClient[sub.client_id]) {
-            subsByClient[sub.client_id] = { count: 0, lastActivity: sub.updated_at };
-          }
-          subsByClient[sub.client_id].count += 1;
-          if (sub.updated_at > subsByClient[sub.client_id].lastActivity) {
-            subsByClient[sub.client_id].lastActivity = sub.updated_at;
-          }
+      const subsByClient: Record<string, { count: number; lastActivity: string }> = {};
+      for (const sub of subsData ?? []) {
+        if (!subsByClient[sub.client_id]) {
+          subsByClient[sub.client_id] = { count: 0, lastActivity: sub.updated_at };
         }
-
-        setClients(
-          (profilesData ?? []).map((p) => ({
-            ...p,
-            submission_count: subsByClient[p.id]?.count ?? 0,
-            last_activity: subsByClient[p.id]?.lastActivity ?? null,
-          }))
-        );
-      } catch {
-        setError("Error al cargar los clientes.");
-      } finally {
-        setLoading(false);
+        subsByClient[sub.client_id].count += 1;
+        if (sub.updated_at > subsByClient[sub.client_id].lastActivity) {
+          subsByClient[sub.client_id].lastActivity = sub.updated_at;
+        }
       }
-    };
 
-    if (!authLoading && profile?.role === "admin") load();
+      setClients(
+        (profilesData ?? []).map((p) => ({
+          ...p,
+          submission_count: subsByClient[p.id]?.count ?? 0,
+          last_activity: subsByClient[p.id]?.lastActivity ?? null,
+        }))
+      );
+    } catch {
+      setError("Error al cargar los clientes.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!authLoading && profile?.role === "admin") loadClients();
   }, [authLoading, profile]);
+
+  const handleInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setInviting(true);
+    setInviteError(null);
+    setInviteSuccess(null);
+
+    try {
+      const token = session?.access_token;
+      const res = await fetch("/api/invite", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(inviteForm),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Error desconocido");
+
+      setInviteSuccess(`Invitación enviada a ${inviteForm.email}`);
+      setInviteForm({ email: "", full_name: "", company_name: "" });
+      await loadClients();
+    } catch (err: unknown) {
+      setInviteError(err instanceof Error ? err.message : "Error al invitar");
+    } finally {
+      setInviting(false);
+    }
+  };
 
   if (authLoading || !user) return null;
 
@@ -93,6 +130,12 @@ export default function AdminClientsPage() {
             {clients.length !== 1 ? "s" : ""}
           </p>
         </div>
+        <button
+          onClick={() => { setShowInvite(true); setInviteError(null); setInviteSuccess(null); }}
+          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+        >
+          + Invitar Cliente
+        </button>
       </div>
 
       {loading ? (
@@ -133,9 +176,8 @@ export default function AdminClientsPage() {
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {clients.map((client) => {
-                const progress = Math.round(
-                  (client.submission_count / 11) * 100
-                );
+                const progress = Math.round((client.submission_count / 11) * 100);
+                const isPending = !!client.invited_at && client.submission_count === 0;
                 return (
                   <tr key={client.id} className="hover:bg-zinc-50">
                     <td className="px-5 py-4">
@@ -144,9 +186,19 @@ export default function AdminClientsPage() {
                           {(client.full_name ?? "?")[0].toUpperCase()}
                         </div>
                         <div>
-                          <p className="font-medium text-zinc-900">
-                            {client.full_name ?? "—"}
-                          </p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-zinc-900">
+                              {client.full_name ?? "—"}
+                            </p>
+                            {isPending && (
+                              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                                Pendiente
+                              </span>
+                            )}
+                          </div>
+                          {client.company_name && (
+                            <p className="text-xs text-zinc-500">{client.company_name}</p>
+                          )}
                           <p className="text-xs text-zinc-400">
                             Registrado {formatDate(client.created_at)}
                           </p>
@@ -183,6 +235,90 @@ export default function AdminClientsPage() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Invite Modal */}
+      {showInvite && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl">
+            <div className="mb-5 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-zinc-900">Invitar Cliente</h2>
+              <button
+                onClick={() => setShowInvite(false)}
+                className="text-zinc-400 hover:text-zinc-600"
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleInvite} className="flex flex-col gap-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-zinc-700">
+                  Correo electrónico *
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={inviteForm.email}
+                  onChange={(e) => setInviteForm((f) => ({ ...f, email: e.target.value }))}
+                  placeholder="cliente@empresa.com"
+                  className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-zinc-700">
+                  Nombre completo
+                </label>
+                <input
+                  type="text"
+                  value={inviteForm.full_name}
+                  onChange={(e) => setInviteForm((f) => ({ ...f, full_name: e.target.value }))}
+                  placeholder="Nombre del cliente"
+                  className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-zinc-700">
+                  Empresa
+                </label>
+                <input
+                  type="text"
+                  value={inviteForm.company_name}
+                  onChange={(e) => setInviteForm((f) => ({ ...f, company_name: e.target.value }))}
+                  placeholder="Nombre de la empresa"
+                  className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+
+              {inviteError && (
+                <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+                  {inviteError}
+                </p>
+              )}
+              {inviteSuccess && (
+                <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+                  ✓ {inviteSuccess}
+                </p>
+              )}
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="submit"
+                  disabled={inviting}
+                  className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {inviting ? "Enviando..." : "Enviar invitación"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowInvite(false)}
+                  className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

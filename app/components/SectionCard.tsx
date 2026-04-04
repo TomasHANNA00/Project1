@@ -78,6 +78,7 @@ export default function SectionCard({
   );
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [deletingFileId, setDeletingFileId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savedOk, setSavedOk] = useState(false);
 
@@ -200,6 +201,34 @@ export default function SectionCard({
       link.href = data.signedUrl;
       link.download = file.file_name;
       link.click();
+    }
+  };
+
+  // ── Delete file ───────────────────────────────────────────
+  const handleDeleteFile = async (file: SubmissionFile) => {
+    if (!confirm(`¿Eliminar "${file.file_name}"? Esta acción no se puede deshacer.`)) return;
+    setDeletingFileId(file.id);
+    setError(null);
+    try {
+      const { error: storageErr } = await supabase.storage
+        .from("submissions")
+        .remove([file.file_path]);
+      if (storageErr) throw storageErr;
+
+      const { error: dbErr } = await supabase
+        .from("submission_files")
+        .delete()
+        .eq("id", file.id);
+      if (dbErr) throw dbErr;
+
+      const updatedFiles = (localSub?.submission_files ?? []).filter((f) => f.id !== file.id);
+      const updatedSub: SubmissionWithFiles = { ...localSub!, submission_files: updatedFiles };
+      setLocalSub(updatedSub);
+      onUpdate(section.id, updatedSub);
+    } catch {
+      setError("Error al eliminar el archivo. Intenta de nuevo.");
+    } finally {
+      setDeletingFileId(null);
     }
   };
 
@@ -344,12 +373,24 @@ export default function SectionCard({
                       {f.file_size ? "·" : ""} {formatDate(f.uploaded_at)}
                     </p>
                   </div>
-                  <button
-                    onClick={() => handleDownload(f)}
-                    className="ml-3 shrink-0 rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-zinc-600 shadow-sm ring-1 ring-zinc-200 transition-colors hover:bg-zinc-100"
-                  >
-                    ⬇ Descargar
-                  </button>
+                  <div className="ml-3 flex shrink-0 items-center gap-1.5">
+                    <button
+                      onClick={() => handleDownload(f)}
+                      className="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-zinc-600 shadow-sm ring-1 ring-zinc-200 transition-colors hover:bg-zinc-100"
+                    >
+                      ⬇ Descargar
+                    </button>
+                    {(isAdmin || f.uploaded_by === currentUserId) && (
+                      <button
+                        onClick={() => handleDeleteFile(f)}
+                        disabled={deletingFileId === f.id}
+                        className="rounded-lg bg-white px-2 py-1 text-xs font-medium text-red-500 shadow-sm ring-1 ring-zinc-200 transition-colors hover:bg-red-50 disabled:opacity-40"
+                        title="Eliminar archivo"
+                      >
+                        {deletingFileId === f.id ? "..." : "🗑"}
+                      </button>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>

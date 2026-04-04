@@ -36,8 +36,14 @@ export default function DashboardLayout({
   const isAdmin = profile?.role === "admin";
 
   const navItems = isAdmin
-    ? [{ label: "Clientes", href: "/dashboard/admin", icon: "👥" }]
-    : [{ label: "Mi Onboarding", href: "/dashboard/onboarding", icon: "📋" }];
+    ? [
+        { label: "Clientes", href: "/dashboard/admin", icon: "👥" },
+        { label: "Mi Perfil", href: "/dashboard/profile", icon: "👤" },
+      ]
+    : [
+        { label: "Mi Onboarding", href: "/dashboard/onboarding", icon: "📋" },
+        { label: "Mi Perfil", href: "/dashboard/profile", icon: "👤" },
+      ];
 
   return (
     <div className="flex h-screen bg-zinc-50">

@@ -4,6 +4,8 @@ export interface Profile {
   id: string
   role: UserRole
   full_name: string | null
+  company_name: string | null
+  invited_at: string | null
   created_at: string
 }
 

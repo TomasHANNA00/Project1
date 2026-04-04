@@ -1,18 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/app/contexts/AuthContext";
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const resetSuccess = searchParams.get("reset") === "success";
 
   useEffect(() => {
     if (!authLoading && user) {
@@ -45,6 +47,11 @@ export default function LoginPage() {
         <h1 className="mb-6 text-xl font-semibold text-zinc-900">
           Iniciar sesión
         </h1>
+        {resetSuccess && (
+          <div className="mb-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+            Contraseña actualizada. Puedes iniciar sesión.
+          </div>
+        )}
         <form onSubmit={handleLogin} className="flex flex-col gap-4">
           <div>
             <label
@@ -92,13 +99,26 @@ export default function LoginPage() {
             {loading ? "Ingresando..." : "Ingresar"}
           </button>
         </form>
-        <p className="mt-4 text-center text-sm text-zinc-500">
-          ¿No tienes cuenta?{" "}
-          <Link href="/signup" className="font-medium text-blue-600 hover:underline">
-            Crear cuenta
+        <div className="mt-4 flex flex-col items-center gap-2 text-sm text-zinc-500">
+          <p>
+            ¿No tienes cuenta?{" "}
+            <Link href="/signup" className="font-medium text-blue-600 hover:underline">
+              Crear cuenta
+            </Link>
+          </p>
+          <Link href="/forgot-password" className="font-medium text-blue-600 hover:underline">
+            ¿Olvidaste tu contraseña?
           </Link>
-        </p>
+        </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
   );
 }
