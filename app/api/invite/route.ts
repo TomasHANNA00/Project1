@@ -1,30 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const ADMIN_EMAILS = ["tomashanna17@gmail.com", "tomas.hanna@vambe.ai"];
 
 export async function POST(req: NextRequest) {
+  const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
   // Verify the caller is an authenticated admin via Bearer token
   const authHeader = req.headers.get("authorization") ?? "";
-  const token = authHeader.replace("Bearer ", "");
+  const token = authHeader.replace("Bearer ", "").trim();
   if (!token) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Validate the token and check admin role
+  // Validate token — getUser verifies the JWT and returns the user
   const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(token);
   if (authErr || !user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { data: callerProfile } = await supabaseAdmin
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-  if (callerProfile?.role !== "admin") {
+
+  // Check admin status: try profiles table first, fall back to hardcoded emails
+  let isAdmin = ADMIN_EMAILS.includes(user.email ?? "");
+  if (!isAdmin) {
+    const { data: callerProfile } = await supabaseAdmin
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+    isAdmin = callerProfile?.role === "admin";
+  }
+  if (!isAdmin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -42,7 +50,7 @@ export async function POST(req: NextRequest) {
   const redirectTo =
     (process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000") + "/reset-password";
 
-  // Invite user — this creates an auth.users entry and sends the email
+  // Invite user — creates an auth.users entry and sends the invite email
   const { data: inviteData, error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(
     email,
     { redirectTo }
