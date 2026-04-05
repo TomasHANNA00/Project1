@@ -106,7 +106,7 @@ export default function AdminClientsPage() {
         body: JSON.stringify(inviteForm),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Error desconocido");
+      if (!res.ok) throw new Error(JSON.stringify(data));
 
       setInviteSuccess(`Invitación enviada a ${inviteForm.email}`);
       setInviteForm({ email: "", full_name: "", company_name: "" });
