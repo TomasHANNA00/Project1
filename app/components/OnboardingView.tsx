@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/app/contexts/AuthContext";
 import type {
+  ClientSection,
   PartWithSections,
   SubmissionWithFiles,
 } from "@/lib/types";
@@ -16,12 +17,11 @@ const PART_ICONS: Record<number, string> = {
   4: "💬",
 };
 
-const TOTAL_SECTIONS = 11;
-
 interface Props {
   clientId: string;
   isAdmin: boolean;
   clientName?: string;
+  refreshKey?: number;
 }
 
 function getSectionStatus(sub?: SubmissionWithFiles): "pending" | "submitted" | "validated" {
@@ -33,12 +33,11 @@ function getSectionStatus(sub?: SubmissionWithFiles): "pending" | "submitted" | 
   return hasContent ? "submitted" : "pending";
 }
 
-export default function OnboardingView({ clientId, isAdmin, clientName }: Props) {
+export default function OnboardingView({ clientId, isAdmin, clientName, refreshKey }: Props) {
   const { user } = useAuth();
   const [parts, setParts] = useState<PartWithSections[]>([]);
-  const [submissionsMap, setSubmissionsMap] = useState<
-    Record<number, SubmissionWithFiles>
-  >({});
+  const [submissionsMap, setSubmissionsMap] = useState<Record<number, SubmissionWithFiles>>({});
+  const [clientSections, setClientSections] = useState<ClientSection[]>([]);
   const [openParts, setOpenParts] = useState<Set<number>>(new Set([1]));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -48,9 +47,6 @@ export default function OnboardingView({ clientId, isAdmin, clientName }: Props)
       setLoading(true);
       setError(null);
       try {
-        // Fetch parts and sections as separate queries to avoid relying on
-        // PostgREST foreign-key relationship resolution, which can fail on
-        // cold schema cache in production.
         const { data: partsData, error: partsErr } = await supabase
           .from("onboarding_parts")
           .select("*")
@@ -63,15 +59,44 @@ export default function OnboardingView({ clientId, isAdmin, clientName }: Props)
           .order("section_order");
         if (sectionsErr) throw sectionsErr;
 
-        const sorted = (partsData ?? []).map((p) => ({
-          ...p,
-          sections: (sectionsData ?? [])
-            .filter((s) => s.part_id === p.id)
-            .sort((a, b) => a.section_order - b.section_order),
-        }));
+        // Fetch client section assignments
+        const { data: csData } = await supabase
+          .from("client_sections")
+          .select("*")
+          .eq("client_id", clientId)
+          .order("display_order");
+        const cs: ClientSection[] = csData ?? [];
+        setClientSections(cs);
+
+        // Build custom description map: section_id → custom_description
+        const customDescMap = new Map<number, string | null>();
+        for (const row of cs) customDescMap.set(row.section_id, row.custom_description);
+
+        // If client has assignments, filter to only those sections; otherwise show all
+        const hasAssignments = cs.length > 0;
+        const assignedIds = new Set(cs.map((row) => row.section_id));
+
+        const sorted = (partsData ?? [])
+          .map((p) => {
+            let sections = (sectionsData ?? [])
+              .filter((s) => s.part_id === p.id)
+              .sort((a, b) => a.section_order - b.section_order);
+
+            if (hasAssignments) {
+              sections = sections
+                .filter((s) => assignedIds.has(s.id))
+                // Apply custom description when set
+                .map((s) => ({
+                  ...s,
+                  description: customDescMap.get(s.id) ?? s.description,
+                }));
+            }
+            return { ...p, sections };
+          })
+          .filter((p) => p.sections.length > 0);
+
         setParts(sorted);
 
-        // Fetch submissions for this client
         const { data: subsData, error: subsErr } = await supabase
           .from("submissions")
           .select("*, submission_files(*)")
@@ -79,9 +104,7 @@ export default function OnboardingView({ clientId, isAdmin, clientName }: Props)
         if (subsErr) throw subsErr;
 
         const map: Record<number, SubmissionWithFiles> = {};
-        for (const sub of subsData ?? []) {
-          map[sub.section_id] = sub;
-        }
+        for (const sub of subsData ?? []) map[sub.section_id] = sub;
         setSubmissionsMap(map);
       } catch {
         setError("Error al cargar los datos. Recarga la página.");
@@ -91,7 +114,7 @@ export default function OnboardingView({ clientId, isAdmin, clientName }: Props)
     };
 
     if (clientId) load();
-  }, [clientId]);
+  }, [clientId, refreshKey]);
 
   const handleUpdate = (sectionId: number, updated: SubmissionWithFiles) => {
     setSubmissionsMap((prev) => ({ ...prev, [sectionId]: updated }));
@@ -105,14 +128,10 @@ export default function OnboardingView({ clientId, isAdmin, clientName }: Props)
     });
   };
 
-  // Progress
-  const completedSections = Object.values(submissionsMap).filter(
-    (s) => getSectionStatus(s) !== "pending"
-  ).length;
-  const validatedSections = Object.values(submissionsMap).filter(
-    (s) => getSectionStatus(s) === "validated"
-  ).length;
-  const progressPercent = Math.round((completedSections / TOTAL_SECTIONS) * 100);
+  const totalSections = clientSections.length > 0 ? clientSections.length : parts.reduce((acc, p) => acc + p.sections.length, 0);
+  const completedSections = Object.values(submissionsMap).filter((s) => getSectionStatus(s) !== "pending").length;
+  const validatedSections = Object.values(submissionsMap).filter((s) => getSectionStatus(s) === "validated").length;
+  const progressPercent = totalSections > 0 ? Math.round((completedSections / totalSections) * 100) : 0;
 
   if (loading) {
     return (
@@ -129,6 +148,23 @@ export default function OnboardingView({ clientId, isAdmin, clientName }: Props)
     return (
       <div className="flex h-64 items-center justify-center">
         <p className="text-sm text-red-600">{error}</p>
+      </div>
+    );
+  }
+
+  // Client with no assigned sections yet
+  if (!isAdmin && clientSections.length === 0 && parts.length === 0) {
+    return (
+      <div className="mx-auto max-w-3xl p-6">
+        <div className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-indigo-50 p-8 text-center">
+          <p className="text-3xl">⚙️</p>
+          <h1 className="mt-4 text-lg font-bold text-zinc-900">
+            Tu espacio de onboarding está siendo configurado
+          </h1>
+          <p className="mt-2 text-sm text-zinc-500">
+            Te notificaremos cuando esté listo para que puedas comenzar.
+          </p>
+        </div>
       </div>
     );
   }
@@ -157,8 +193,7 @@ export default function OnboardingView({ clientId, isAdmin, clientName }: Props)
             Onboarding de {clientName ?? clientId}
           </h1>
           <p className="mt-1 text-sm text-zinc-500">
-            Vista administrativa — puedes editar y subir archivos en nombre del
-            cliente.
+            Vista administrativa — puedes editar y subir archivos en nombre del cliente.
           </p>
         </div>
       )}
@@ -166,11 +201,9 @@ export default function OnboardingView({ clientId, isAdmin, clientName }: Props)
       {/* Progress bar */}
       <div className="rounded-xl border border-zinc-200 bg-white p-5">
         <div className="mb-3 flex items-center justify-between">
-          <span className="text-sm font-medium text-zinc-700">
-            Progreso general
-          </span>
+          <span className="text-sm font-medium text-zinc-700">Progreso general</span>
           <span className="text-sm font-semibold text-zinc-900">
-            {completedSections}/{TOTAL_SECTIONS} secciones completadas
+            {completedSections}/{totalSections} secciones completadas
           </span>
         </div>
         <div className="h-2.5 w-full overflow-hidden rounded-full bg-zinc-100">
@@ -182,7 +215,7 @@ export default function OnboardingView({ clientId, isAdmin, clientName }: Props)
         <div className="mt-2 flex gap-4 text-xs text-zinc-500">
           <span>📤 {completedSections} enviadas</span>
           <span>✅ {validatedSections} validadas</span>
-          <span>⏳ {TOTAL_SECTIONS - completedSections} pendientes</span>
+          <span>⏳ {totalSections - completedSections} pendientes</span>
         </div>
       </div>
 
@@ -195,19 +228,13 @@ export default function OnboardingView({ clientId, isAdmin, clientName }: Props)
         ).length;
 
         return (
-          <div
-            key={part.id}
-            className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm"
-          >
-            {/* Part header */}
+          <div key={part.id} className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
             <button
               onClick={() => togglePart(part.part_number)}
               className="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-zinc-50"
             >
               <div className="flex items-center gap-3">
-                <span className="text-2xl">
-                  {PART_ICONS[part.part_number]}
-                </span>
+                <span className="text-2xl">{PART_ICONS[part.part_number] ?? "📋"}</span>
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wider text-zinc-400">
                     Parte {part.part_number}
@@ -216,32 +243,17 @@ export default function OnboardingView({ clientId, isAdmin, clientName }: Props)
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-sm text-zinc-500">
-                  {partCompleted}/{partSections.length}
-                </span>
-                <span
-                  className={`text-zinc-400 transition-transform ${
-                    isOpen ? "rotate-180" : ""
-                  }`}
-                >
-                  ▾
-                </span>
+                <span className="text-sm text-zinc-500">{partCompleted}/{partSections.length}</span>
+                <span className={`text-zinc-400 transition-transform ${isOpen ? "rotate-180" : ""}`}>▾</span>
               </div>
             </button>
 
-            {/* Why we ask */}
             {isOpen && (
               <div className="border-t border-zinc-100">
                 <div className="bg-amber-50 px-5 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">
-                    ¿Por qué te pedimos esto?
-                  </p>
-                  <p className="mt-1 text-sm leading-relaxed text-amber-800">
-                    {part.why_we_ask}
-                  </p>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">¿Por qué te pedimos esto?</p>
+                  <p className="mt-1 text-sm leading-relaxed text-amber-800">{part.why_we_ask}</p>
                 </div>
-
-                {/* Sections */}
                 <div className="space-y-4 p-5">
                   {partSections.map((section) => (
                     <SectionCard
@@ -265,11 +277,9 @@ export default function OnboardingView({ clientId, isAdmin, clientName }: Props)
       {!isAdmin && (
         <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-5">
           <p className="text-xs leading-relaxed text-zinc-500">
-            🔒 <strong>Confidencialidad:</strong> La información que compartes
-            aquí es utilizada exclusivamente para configurar y entrenar tu
-            asistente de inteligencia artificial. Entre más detallada sea la
-            información, mejor será el rendimiento de tu agente. Tus datos son
-            tratados de forma confidencial y segura.
+            🔒 <strong>Confidencialidad:</strong> La información que compartes aquí es utilizada exclusivamente
+            para configurar y entrenar tu asistente de inteligencia artificial. Tus datos son tratados de forma
+            confidencial y segura.
           </p>
         </div>
       )}

@@ -58,10 +58,12 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { email, full_name, company_name } = body as {
+  const { email, full_name, company_name, template_id, section_ids } = body as {
     email: string;
     full_name?: string;
     company_name?: string;
+    template_id?: number | null;
+    section_ids?: number[] | null;
   };
 
   if (!email) {
@@ -86,9 +88,27 @@ export async function POST(req: NextRequest) {
       company_name: company_name ?? null,
       role: "client",
       invited_at: new Date().toISOString(),
+      template_id: template_id ?? null,
     },
     { onConflict: "id" }
   );
+
+  // Assign sections from template if provided
+  if (template_id) {
+    let query = supabaseAdmin.from("template_sections").select("*").eq("template_id", template_id);
+    const { data: ts } = await query;
+    const rows = (ts ?? [])
+      .filter((row) => !section_ids || section_ids.includes(row.section_id))
+      .map((row) => ({
+        client_id: newUserId,
+        section_id: row.section_id,
+        custom_description: row.custom_description,
+        display_order: row.display_order,
+      }));
+    if (rows.length > 0) {
+      await supabaseAdmin.from("client_sections").insert(rows);
+    }
+  }
 
   return NextResponse.json({ success: true, userId: newUserId });
 }

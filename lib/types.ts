@@ -6,7 +6,31 @@ export interface Profile {
   full_name: string | null
   company_name: string | null
   invited_at: string | null
+  template_id: number | null
   created_at: string
+}
+
+export interface OnboardingTemplate {
+  id: number
+  name: string
+  description: string | null
+  created_at: string
+}
+
+export interface TemplateSection {
+  id: number
+  template_id: number
+  section_id: number
+  custom_description: string | null
+  display_order: number
+}
+
+export interface ClientSection {
+  id: number
+  client_id: string
+  section_id: number
+  custom_description: string | null
+  display_order: number
 }
 
 export interface OnboardingPart {
