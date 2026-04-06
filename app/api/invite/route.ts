@@ -58,13 +58,15 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { email, full_name, company_name, template_id, section_ids } = body as {
+  const { email, full_name, company_name, template_id, section_ids, role } = body as {
     email: string;
     full_name?: string;
     company_name?: string;
     template_id?: number | null;
     section_ids?: number[] | null;
+    role?: "client" | "admin";
   };
+  const invitedRole: "client" | "admin" = role === "admin" ? "admin" : "client";
 
   if (!email) {
     return NextResponse.json({ error: "email is required" }, { status: 400 });
@@ -86,15 +88,15 @@ export async function POST(req: NextRequest) {
       id: newUserId,
       full_name: full_name ?? null,
       company_name: company_name ?? null,
-      role: "client",
+      role: invitedRole,
       invited_at: new Date().toISOString(),
       template_id: template_id ?? null,
     },
     { onConflict: "id" }
   );
 
-  // Assign sections from template if provided
-  if (template_id) {
+  // Assign sections from template — only for clients
+  if (invitedRole === "client" && template_id) {
     let query = supabaseAdmin.from("template_sections").select("*").eq("template_id", template_id);
     const { data: ts } = await query;
     const rows = (ts ?? [])

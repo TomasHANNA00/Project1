@@ -27,6 +27,7 @@ interface InviteForm {
   email: string;
   full_name: string;
   company_name: string;
+  role: "client" | "admin";
 }
 
 export default function AdminClientsPage() {
@@ -42,7 +43,7 @@ export default function AdminClientsPage() {
   // Invite modal state
   const [showInvite, setShowInvite] = useState(false);
   const [inviteStep, setInviteStep] = useState<1 | 2>(1);
-  const [inviteForm, setInviteForm] = useState<InviteForm>({ email: "", full_name: "", company_name: "" });
+  const [inviteForm, setInviteForm] = useState<InviteForm>({ email: "", full_name: "", company_name: "", role: "client" });
   const [inviteTemplateId, setInviteTemplateId] = useState<number | "">("");
   const [templateSections, setTemplateSections] = useState<TemplateSection[]>([]);
   const [selectedSectionIds, setSelectedSectionIds] = useState<Set<number>>(new Set());
@@ -135,7 +136,7 @@ export default function AdminClientsPage() {
   const openInvite = () => {
     setShowInvite(true);
     setInviteStep(1);
-    setInviteForm({ email: "", full_name: "", company_name: "" });
+    setInviteForm({ email: "", full_name: "", company_name: "", role: "client" });
     setInviteTemplateId("");
     setTemplateSections([]);
     setSelectedSectionIds(new Set());
@@ -155,14 +156,14 @@ export default function AdminClientsPage() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           ...inviteForm,
-          template_id: inviteTemplateId || null,
-          section_ids: inviteTemplateId ? Array.from(selectedSectionIds) : null,
+          template_id: inviteForm.role === "client" ? (inviteTemplateId || null) : null,
+          section_ids: inviteForm.role === "client" && inviteTemplateId ? Array.from(selectedSectionIds) : null,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Error desconocido");
       setInviteSuccess(`Invitación enviada a ${inviteForm.email}`);
-      setInviteForm({ email: "", full_name: "", company_name: "" });
+      setInviteForm({ email: "", full_name: "", company_name: "", role: "client" });
       setInviteStep(1);
       await loadClients();
     } catch (err: unknown) {
@@ -285,7 +286,7 @@ export default function AdminClientsPage() {
               <button onClick={() => setShowInvite(false)} className="text-zinc-400 hover:text-zinc-600">✕</button>
             </div>
 
-            <form onSubmit={inviteStep === 1 ? (e) => { e.preventDefault(); setInviteStep(2); } : handleInvite}>
+            <form onSubmit={inviteStep === 1 ? (e) => { e.preventDefault(); inviteForm.role === "admin" ? handleInvite(e) : setInviteStep(2); } : handleInvite}>
               {inviteStep === 1 ? (
                 <div className="space-y-4">
                   <div>
@@ -309,9 +310,21 @@ export default function AdminClientsPage() {
                       placeholder="Nombre de la empresa"
                       className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
                   </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-zinc-700">Rol</label>
+                    <div className="flex gap-3">
+                      {(["client", "admin"] as const).map((r) => (
+                        <label key={r} className={`flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${inviteForm.role === r ? "border-blue-500 bg-blue-50 text-blue-700" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>
+                          <input type="radio" name="invite-role" value={r} checked={inviteForm.role === r}
+                            onChange={() => setInviteForm((f) => ({ ...f, role: r }))} className="sr-only" />
+                          {r === "client" ? "👤 Cliente" : "🔑 Admin"}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                   <div className="flex gap-3 pt-1">
                     <button type="submit" className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
-                      Siguiente →
+                      {inviteForm.role === "admin" ? "Enviar invitación" : "Siguiente →"}
                     </button>
                     <button type="button" onClick={() => setShowInvite(false)} className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50">
                       Cancelar
