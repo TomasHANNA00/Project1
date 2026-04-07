@@ -34,14 +34,22 @@ export default function ClientSectionManager({ clientId, onUpdate }: Props) {
       supabase.from("onboarding_templates").select("*").order("id"),
       supabase.from("profiles").select("template_id").eq("id", clientId).single(),
     ]);
-    const merged: PartWithSections[] = (pData ?? []).map((p) => ({
-      ...p,
-      sections: (sData ?? []).filter((s) => s.part_id === p.id).sort((a, b) => a.section_order - b.section_order),
-    }));
+    const templateId = profileData?.template_id ?? null;
+    // Only include sections relevant to this client:
+    // global sections (template_id IS NULL) or sections from client's template
+    const relevantSections = (sData ?? []).filter(
+      (s) => s.template_id === null || s.template_id === templateId
+    );
+    const merged: PartWithSections[] = (pData ?? [])
+      .map((p) => ({
+        ...p,
+        sections: relevantSections.filter((s) => s.part_id === p.id).sort((a, b) => a.section_order - b.section_order),
+      }))
+      .filter((p) => p.sections.length > 0);
     setClientSections(cs ?? []);
     setAllParts(merged);
     setTemplates(tData ?? []);
-    setCurrentTemplateId(profileData?.template_id ?? null);
+    setCurrentTemplateId(templateId);
     setLoading(false);
   };
 

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/app/contexts/AuthContext";
-import type { OnboardingTemplate, TemplateSection, PartWithSections } from "@/lib/types";
+import type { OnboardingTemplate, PartWithSections } from "@/lib/types";
 
 export default function TemplatesPage() {
   const { user, profile, loading: authLoading } = useAuth();
@@ -17,14 +17,11 @@ export default function TemplatesPage() {
 
   // Selected template for editing
   const [selected, setSelected] = useState<OnboardingTemplate | null>(null);
-  const [selectedSections, setSelectedSections] = useState<TemplateSection[]>([]);
   // Editable fields
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
   // Custom descriptions per section_id
   const [customDescs, setCustomDescs] = useState<Record<number, string>>({});
-  // Which section_ids are checked
-  const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<OnboardingTemplate | null>(null);
@@ -40,15 +37,24 @@ export default function TemplatesPage() {
   const loadAll = async () => {
     setLoading(true);
     const { data: tData } = await supabase.from("onboarding_templates").select("*").order("id");
-    const { data: pData } = await supabase.from("onboarding_parts").select("*").order("part_number");
-    const { data: sData } = await supabase.from("onboarding_sections").select("*").order("section_order");
-    const merged: PartWithSections[] = (pData ?? []).map((p) => ({
-      ...p,
-      sections: (sData ?? []).filter((s) => s.part_id === p.id).sort((a, b) => a.section_order - b.section_order),
-    }));
     setTemplates(tData ?? []);
-    setParts(merged);
     setLoading(false);
+  };
+
+  const loadPartsForTemplate = async (templateId: number) => {
+    const { data: pData } = await supabase.from("onboarding_parts").select("*").order("part_number");
+    const { data: sData } = await supabase
+      .from("onboarding_sections")
+      .select("*")
+      .eq("template_id", templateId)
+      .order("section_order");
+    const merged: PartWithSections[] = (pData ?? [])
+      .map((p) => ({
+        ...p,
+        sections: (sData ?? []).filter((s) => s.part_id === p.id).sort((a, b) => a.section_order - b.section_order),
+      }))
+      .filter((p) => p.sections.length > 0);
+    setParts(merged);
   };
 
   useEffect(() => {
@@ -60,15 +66,15 @@ export default function TemplatesPage() {
     setEditName(t.name);
     setEditDesc(t.description ?? "");
     setError(null);
+    setCustomDescs({});
+    // Load template-specific sections
+    await loadPartsForTemplate(t.id);
     const { data: ts } = await supabase
       .from("template_sections")
       .select("*")
       .eq("template_id", t.id);
-    const sections = ts ?? [];
-    setSelectedSections(sections);
-    setCheckedIds(new Set(sections.map((s) => s.section_id)));
     const descs: Record<number, string> = {};
-    for (const s of sections) {
+    for (const s of ts ?? []) {
       if (s.custom_description) descs[s.section_id] = s.custom_description;
     }
     setCustomDescs(descs);
@@ -85,19 +91,16 @@ export default function TemplatesPage() {
       .eq("id", selected.id);
     if (nameErr) { setError(nameErr.message); setSaving(false); return; }
 
-    // Rebuild template_sections: delete all then re-insert checked ones
-    await supabase.from("template_sections").delete().eq("template_id", selected.id);
-
-    if (checkedIds.size > 0) {
-      const allSections = parts.flatMap((p) => p.sections);
-      const rows = allSections
-        .filter((s) => checkedIds.has(s.id))
-        .map((s) => ({
-          template_id: selected.id,
-          section_id: s.id,
-          custom_description: customDescs[s.id]?.trim() || null,
-          display_order: s.section_order,
-        }));
+    // Update custom descriptions for all sections in this template
+    const allSections = parts.flatMap((p) => p.sections);
+    if (allSections.length > 0) {
+      await supabase.from("template_sections").delete().eq("template_id", selected.id);
+      const rows = allSections.map((s, idx) => ({
+        template_id: selected.id,
+        section_id: s.id,
+        custom_description: customDescs[s.id]?.trim() || null,
+        display_order: idx + 1,
+      }));
       const { error: insertErr } = await supabase.from("template_sections").insert(rows);
       if (insertErr) { setError(insertErr.message); setSaving(false); return; }
     }
@@ -136,13 +139,6 @@ export default function TemplatesPage() {
     await loadAll();
   };
 
-  const toggleSection = (sectionId: number) => {
-    setCheckedIds((prev) => {
-      const next = new Set(prev);
-      next.has(sectionId) ? next.delete(sectionId) : next.add(sectionId);
-      return next;
-    });
-  };
 
   if (authLoading || !user) return null;
 
@@ -230,11 +226,11 @@ export default function TemplatesPage() {
               </div>
             </div>
 
-            {/* Section selection */}
+            {/* Section list (fixed per template) */}
             <div className="rounded-xl border border-zinc-200 bg-white p-5">
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-base font-semibold text-zinc-900">Secciones incluidas</h2>
-                <span className="text-sm text-zinc-500">{checkedIds.size}/{allSectionsCount} seleccionadas</span>
+                <h2 className="text-base font-semibold text-zinc-900">Secciones de esta plantilla</h2>
+                <span className="text-sm text-zinc-500">{allSectionsCount} secciones</span>
               </div>
               <div className="space-y-4">
                 {parts.map((part) => (
@@ -243,39 +239,29 @@ export default function TemplatesPage() {
                       Parte {part.part_number} — {part.title}
                     </p>
                     <div className="space-y-2">
-                      {part.sections.map((section) => {
-                        const checked = checkedIds.has(section.id);
-                        return (
-                          <div key={section.id} className={`rounded-lg border p-3 transition-colors ${checked ? "border-blue-200 bg-blue-50" : "border-zinc-100 bg-zinc-50"}`}>
-                            <label className="flex cursor-pointer items-start gap-3">
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => toggleSection(section.id)}
-                                className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-blue-600"
-                              />
-                              <div className="flex-1">
-                                <p className="text-sm font-medium text-zinc-900">{section.title}</p>
-                                <p className="text-xs text-zinc-500">{section.description}</p>
-                              </div>
-                            </label>
-                            {checked && (
-                              <div className="mt-2 pl-7">
-                                <label className="mb-1 block text-xs font-medium text-zinc-500">
-                                  Descripción personalizada para esta plantilla (opcional)
-                                </label>
-                                <textarea
-                                  rows={2}
-                                  value={customDescs[section.id] ?? ""}
-                                  onChange={(e) => setCustomDescs((prev) => ({ ...prev, [section.id]: e.target.value }))}
-                                  placeholder="Deja en blanco para usar la descripción por defecto"
-                                  className="w-full resize-y rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400/20"
-                                />
-                              </div>
-                            )}
+                      {part.sections.map((section) => (
+                        <div key={section.id} className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+                          <div className="flex items-start gap-2">
+                            <span className="mt-0.5 text-blue-500">✓</span>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-zinc-900">{section.title}</p>
+                              <p className="text-xs text-zinc-500">{section.description}</p>
+                            </div>
                           </div>
-                        );
-                      })}
+                          <div className="mt-2 pl-6">
+                            <label className="mb-1 block text-xs font-medium text-zinc-500">
+                              Descripción personalizada (opcional)
+                            </label>
+                            <textarea
+                              rows={2}
+                              value={customDescs[section.id] ?? ""}
+                              onChange={(e) => setCustomDescs((prev) => ({ ...prev, [section.id]: e.target.value }))}
+                              placeholder="Deja en blanco para usar la descripción por defecto"
+                              className="w-full resize-y rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400/20"
+                            />
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 ))}

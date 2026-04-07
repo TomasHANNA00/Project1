@@ -72,7 +72,8 @@ export default function OnboardingView({ clientId, isAdmin, clientName, refreshK
         const customDescMap = new Map<number, string | null>();
         for (const row of cs) customDescMap.set(row.section_id, row.custom_description);
 
-        // If client has assignments, filter to only those sections; otherwise show all
+        // If client has assignments, filter to only those sections;
+        // otherwise show only legacy global sections (template_id IS NULL)
         const hasAssignments = cs.length > 0;
         const assignedIds = new Set(cs.map((row) => row.section_id));
 
@@ -90,6 +91,9 @@ export default function OnboardingView({ clientId, isAdmin, clientName, refreshK
                   ...s,
                   description: customDescMap.get(s.id) ?? s.description,
                 }));
+            } else {
+              // Backward compat: legacy clients see only global sections (no template)
+              sections = sections.filter((s) => s.template_id === null);
             }
             return { ...p, sections };
           })

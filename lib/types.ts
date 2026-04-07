@@ -46,6 +46,7 @@ export interface OnboardingSection {
   section_order: number
   title: string
   description: string
+  template_id: number | null
 }
 
 export interface Submission {
