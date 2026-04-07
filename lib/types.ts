@@ -88,3 +88,21 @@ export interface ClientWithProgress extends Profile {
   submission_count: number
   last_activity: string
 }
+
+export interface PipelineItem {
+  id: string
+  client_id: string
+  section_id: number
+  depured_text: string | null
+  status: 'depurado' | 'enviado'
+  depured_at: string
+  sent_at: string | null
+  updated_at: string
+}
+
+export interface PromptTemplate {
+  id: number
+  section_id: number
+  prompt: string
+  updated_at: string
+}

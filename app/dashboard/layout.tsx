@@ -38,6 +38,7 @@ export default function DashboardLayout({
   const navItems = isAdmin
     ? [
         { label: "Clientes", href: "/dashboard/admin", icon: "👥" },
+        { label: "Pipeline", href: "/dashboard/admin/pipeline", icon: "⚡" },
         { label: "Plantillas", href: "/dashboard/admin/templates", icon: "🗂️" },
         { label: "Mi Perfil", href: "/dashboard/profile", icon: "👤" },
       ]
