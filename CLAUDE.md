@@ -2,7 +2,7 @@
 
 # Vambe Client Onboarding Portal — Project State
 
-**Last updated:** 2026-04-04
+**Last updated:** 2026-04-09
 **Stack:** Next.js 16.2.2 · React 19 · TypeScript · Tailwind CSS v4 · Supabase
 **Supabase project:** `bzfspkxbvqjbvmumrozx` (name: "Files", org: Vambe Pro)
 **Supabase URL:** https://bzfspkxbvqjbvmumrozx.supabase.co
@@ -13,9 +13,9 @@
 ## What This App Is
 
 A private onboarding portal for Vambe's AI clients. Clients log in and submit text
-and files across 11 structured sections (organized into 4 parts). Admins can view all
-clients, upload on their behalf, and validate submissions. The collected information is
-used to configure and train each client's AI assistant.
+and files across structured sections (organized into parts per template). Admins can
+view all clients, upload on their behalf, validate submissions, and run a data pipeline
+that cleans raw client data with AI and prepares it for export to Pandai.
 
 ---
 
@@ -23,8 +23,8 @@ used to configure and train each client's AI assistant.
 
 | Role | Email | Access |
 |------|-------|--------|
-| `admin` | tomashanna17@gmail.com | Full access — all clients, all submissions |
-| `admin` | tomas.hanna@vambe.ai | Full access — all clients, all submissions |
+| `admin` | tomashanna17@gmail.com | Full access — all clients, all submissions, pipeline |
+| `admin` | tomas.hanna@vambe.ai | Full access — all clients, all submissions, pipeline |
 | `client` | any other signup | Own onboarding only |
 
 New signups are `client` by default. The two admin emails are hardcoded in the
@@ -36,13 +36,18 @@ New signups are `client` by default. The two admin emails are hardcoded in the
 
 ### Tables
 
-| Table | Rows | RLS | Policies |
-|-------|------|-----|----------|
-| `profiles` | 3 | ✅ | 3 (SELECT own, UPDATE own, admin UPDATE all) |
-| `onboarding_parts` | 4 | ✅ | 1 (SELECT for authenticated) |
-| `onboarding_sections` | 11 | ✅ | 1 (SELECT for authenticated) |
-| `submissions` | 1 | ✅ | 4 (SELECT/INSERT/UPDATE own, admin DELETE) |
-| `submission_files` | 0 | ✅ | 3 (SELECT/INSERT/DELETE own or admin) |
+| Table | RLS | Notes |
+|-------|-----|-------|
+| `profiles` | ✅ | SELECT own, UPDATE own, admin UPDATE all |
+| `onboarding_parts` | ✅ | SELECT for authenticated. Part_number is NOT unique (template parts share numbers 1-3). |
+| `onboarding_sections` | ✅ | SELECT for authenticated. `template_id` FK — NULL = legacy global, non-NULL = template-specific. |
+| `onboarding_templates` | ✅ | 6 industry templates: Salud(1), E-commerce(2), Educación(3), Servicios(4), Inmobiliaria(5), Automotora(6) |
+| `template_sections` | ✅ | Maps template → its sections with optional custom_description and display_order |
+| `client_sections` | ✅ | Per-client section assignments. Empty = backward compat (show all global sections). |
+| `submissions` | ✅ | SELECT/INSERT/UPDATE own, admin DELETE |
+| `submission_files` | ✅ | SELECT/INSERT/DELETE own or admin |
+| `pipeline_items` | ✅ | Admin-only. Depured text + status per client+section. status: 'depurado' \| 'enviado'. UNIQUE(client_id, section_id). |
+| `prompt_templates` | ✅ | Admin-only. Per-section prompt for Pandai export. UNIQUE(section_id). |
 
 ### Key DB objects
 
@@ -52,9 +57,18 @@ New signups are `client` by default. The two admin emails are hardcoded in the
   profile row, sets `role = 'admin'` for the two hardcoded emails, `'client'` for all
   others.
 
-### Grants (critical — tables were created via raw SQL, not Supabase UI)
+### Section architecture (Phase 3–4)
 
-These grants are required and have been applied. If tables are ever recreated, re-apply:
+- **Legacy global sections** — `template_id IS NULL`, under old parts (part_number 1–4).
+  Clients with no `client_sections` assignments see these.
+- **Template-specific sections** — `template_id = X`, under new shared parts
+  (part_number 1–3: "Bases de la Empresa", "Resolución de Dudas y Estrategia de Venta",
+  "Conversaciones Reales"). Each of the 6 templates has 6–7 industry-specific sections.
+- **`onboarding_parts.part_number` is not unique** — the unique constraint was dropped.
+  Multiple parts can share part_number 1, 2, 3. Only parts whose sections are assigned
+  to a client will be rendered (`.filter((p) => p.sections.length > 0)`).
+
+### Grants (critical — tables were created via raw SQL, not Supabase UI)
 
 ```sql
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
@@ -64,10 +78,12 @@ GRANT SELECT ON public.profiles            TO anon;
 GRANT SELECT, UPDATE ON public.profiles    TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.submissions      TO authenticated;
 GRANT SELECT, INSERT, DELETE         ON public.submission_files TO authenticated;
+GRANT ALL ON public.pipeline_items    TO authenticated;
+GRANT ALL ON public.prompt_templates  TO authenticated;
+GRANT USAGE, SELECT ON SEQUENCE public.prompt_templates_id_seq TO authenticated;
 ```
 
 **Root cause of every 403 ever encountered:** missing `GRANT USAGE ON SCHEMA public`.
-Without it, `anon`/`authenticated` roles can't find any table regardless of policies.
 
 ### Storage
 
@@ -75,19 +91,6 @@ Without it, `anon`/`authenticated` roles can't find any table regardless of poli
 - **Upload path pattern:** `{client_id}/{section_id}/{timestamp-filename}`
 - **Storage RLS:** clients can read/write their own folder; admins can read/write any path
 - **Download:** signed URLs (60 s expiry) via `createSignedUrl()`
-
-### Onboarding content seeded
-
-**Part 1 — Bases y Configuración Técnica:** Estado de Integración · Información
-Institucional y Ubicaciones · Métodos y Procesos de Pago · Logística y Entrega
-
-**Part 2 — Flujo de Venta y Estrategia:** Guía de Productos / Catálogo · Recuperación
-de Carritos Abandonados · Preguntas Frecuentes (FAQ)
-
-**Part 3 — Postventa y Derivaciones:** Políticas de Cambios y Devoluciones · Seguimiento
-y Soporte · Derivaciones a Humanos
-
-**Part 4 — Conversaciones Reales:** Conversaciones Reales
 
 ---
 
@@ -104,45 +107,80 @@ app/
                                     loading. Uses getSession() as primary init so the
                                     Supabase HTTP client has the JWT before any query runs.
                                     Includes 8 s safety timeout and mounted ref guard.
+  api/
+    invite/route.ts                 POST — admin-only. Invites a user by email via
+                                    Supabase admin.inviteUserByEmail, creates profile row,
+                                    assigns client_sections from template. Auth via JWT
+                                    decode (avoids service-role getUser() reliability issue).
+    depure/route.ts                 POST — admin-only. Receives raw_text + section_title +
+                                    section_description + company_name. Calls Anthropic
+                                    claude-sonnet-4-20250514 to clean/structure the text.
+                                    Returns { depured_text }. Requires ANTHROPIC_API_KEY
+                                    env var — shows helpful error if missing.
   dashboard/
-    layout.tsx                      Protected shell — sidebar + header. Role-aware nav:
-                                    admins see "Clientes", clients see "Mi Onboarding".
-                                    Redirects to /login if not authenticated.
-    page.tsx                        Redirect router — sends admins to /dashboard/admin,
-                                    clients to /dashboard/onboarding.
+    layout.tsx                      Protected shell — sidebar + header. Admin nav:
+                                    Clientes · Pipeline · Plantillas · Mi Perfil.
+                                    Client nav: Mi Onboarding · Mi Perfil.
+    page.tsx                        Redirect router — admins → /dashboard/admin,
+                                    clients → /dashboard/onboarding.
     onboarding/
       page.tsx                      Client onboarding page — renders <OnboardingView>
                                     with the logged-in user's own clientId.
     admin/
-      page.tsx                      Admin clients list — table of all client profiles
-                                    with progress bars, last activity, link to detail.
+      page.tsx                      Admin clients list — invite modal (2-step: email/
+                                    name/company/role → template + section checkboxes),
+                                    client table with template badge and progress.
       [clientId]/
-        page.tsx                    Admin client detail — breadcrumb + <OnboardingView>
-                                    for the selected client with isAdmin=true.
+        page.tsx                    Admin client detail — breadcrumb + <ClientSectionManager>
+                                    (admin-only bar) + <OnboardingView isAdmin=true>.
+      templates/
+        page.tsx                    Two-panel template editor. Left: template list with
+                                    create/delete. Right: full section CRUD — inline edit
+                                    (title+description), delete with confirm, add section
+                                    per part, add new part (requires first section).
+                                    "Gestionar Secciones" page removed from nav.
+      pipeline/
+        page.tsx                    Admin pipeline (Phase 5). Overview stats (pending
+                                    clients, depurado, enviado). Client selector dropdown.
+                                    Per-section two-column layout: raw client data (left,
+                                    read-only with file downloads) vs depured textarea
+                                    (right, editable). Buttons: "Depurar con IA" (calls
+                                    /api/depure, auto-fills textarea), "Guardar depuración"
+                                    (upserts pipeline_items), "Enviar a Pandai" (disabled,
+                                    tooltip: webhook no configurado). Status badges:
+                                    Sin datos → Datos recibidos → Depurado → Enviado.
+        prompts/
+          page.tsx                  Prompt template editor. Lists all template-specific
+                                    sections grouped. Expandable editor per section with
+                                    variable insertion buttons ({company_name},
+                                    {section_title}, {depured_text}). Dirty state tracking,
+                                    save feedback, reset to default. Saved via upsert to
+                                    prompt_templates table.
   components/
     OnboardingView.tsx              Core shared component. Fetches parts, sections, and
-                                    submissions for a given clientId. Renders collapsible
-                                    parts with progress bar, "why we ask" boxes, and a
-                                    <SectionCard> per section. Works for both client and
-                                    admin views. Uses two separate queries (not embedded
-                                    select) to avoid PostgREST schema-cache issues.
+                                    submissions for a given clientId. Backward compat:
+                                    no assignments → shows global sections (template_id
+                                    IS NULL) only. With assignments → filters to assigned
+                                    sections with custom descriptions applied.
     SectionCard.tsx                 Per-section card. Handles text save (upsert),
                                     file upload (storage + DB record), file download
                                     (signed URL), admin validation toggle, and client
-                                    approval checkbox for admin-uploaded files. All
-                                    mutations are client-side via the anon Supabase
-                                    client — RLS enforces access control.
-    FileUploadZone.tsx              Drag-and-drop / click-to-upload zone. Accepts any
-                                    file type.
+                                    approval checkbox for admin-uploaded files.
+    ClientSectionManager.tsx        Admin-only bar on client detail page. Shows assigned
+                                    section chips with remove buttons. "Cambiar plantilla"
+                                    modal: template selector + per-section checkboxes
+                                    (loads section details for the selected template to
+                                    avoid blank titles). "Añadir sección" dropdown.
+    FileUploadZone.tsx              Drag-and-drop / click-to-upload zone.
 lib/
   supabase.ts                       Module-level Supabase client singleton (anon key).
-  types.ts                          TypeScript interfaces for all DB tables: Profile,
-                                    OnboardingPart, OnboardingSection, Submission,
-                                    SubmissionFile, PartWithSections, SubmissionWithFiles,
-                                    ClientWithProgress.
-proxy.ts                            Next.js 16 middleware (renamed from middleware.ts).
-                                    Currently passes all requests through — auth is
-                                    handled client-side via AuthContext.
+  types.ts                          TypeScript interfaces: Profile, OnboardingPart,
+                                    OnboardingSection (includes template_id), Submission,
+                                    SubmissionFile, OnboardingTemplate, TemplateSection,
+                                    ClientSection, PartWithSections, SubmissionWithFiles,
+                                    ClientWithProgress, PipelineItem, PromptTemplate.
+proxy.ts                            Next.js 16 middleware. Passes all requests through —
+                                    auth is handled client-side via AuthContext.
 ```
 
 ---
@@ -154,12 +192,14 @@ proxy.ts                            Next.js 16 middleware (renamed from middlewa
 NEXT_PUBLIC_SUPABASE_URL=https://bzfspkxbvqjbvmumrozx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ANTHROPIC_API_KEY=sk-ant-...        # Required for "Depurar con IA" in the pipeline
 ```
 
-`NEXT_PUBLIC_*` vars are baked into the client bundle at **build time**. If they are
-missing in Vercel's environment variables, every Supabase request fails silently and the
-app shows a permanent loading spinner. Always set them in Vercel → Project Settings →
-Environment Variables before deploying.
+`NEXT_PUBLIC_*` vars are baked into the client bundle at **build time**. If missing in
+Vercel, every Supabase request fails silently (permanent loading spinner).
+
+`ANTHROPIC_API_KEY` is server-only (used in `/api/depure`). Without it the depuration
+button shows a clear error message — the app still works otherwise.
 
 ---
 
@@ -174,9 +214,35 @@ Environment Variables before deploying.
        → client → /dashboard/onboarding
 ```
 
-**Critical implementation note:** `getSession()` must be called before any
-`supabase.from()` query. `onAuthStateChange` alone does NOT reliably update the HTTP
-client's Authorization header before the first query fires. See `AuthContext.tsx`.
+**Critical:** `getSession()` must be called before any `supabase.from()` query.
+`onAuthStateChange` alone does NOT reliably update the HTTP client's Authorization
+header before the first query fires.
+
+---
+
+## Pipeline Flow (Phase 5)
+
+```
+Client submits onboarding data
+  → Admin opens /dashboard/admin/pipeline
+  → Selects client from dropdown
+  → Sees raw client text (left column) per section
+  → Clicks "Depurar con IA"
+      → Browser POSTs to /api/depure with auth token
+      → Server calls Anthropic API (claude-sonnet-4-20250514)
+      → Returns cleaned, structured plain text
+  → Admin reviews + edits in right column textarea
+  → Clicks "Guardar depuración"
+      → Upserts pipeline_items (status: 'depurado')
+  → "Enviar a Pandai" button (disabled — webhook not yet configured)
+      → Will use prompt_templates + depured_text when implemented
+```
+
+**Status flow per section:**
+- `sin_datos` — no submission content
+- `datos_recibidos` — submission exists but no pipeline_item
+- `depurado` — pipeline_item.status = 'depurado'
+- `enviado` — pipeline_item.status = 'enviado'
 
 ---
 
@@ -185,71 +251,62 @@ client's Authorization header before the first query fires. See `AuthContext.tsx
 - ✅ Email/password login and signup (Spanish UI)
 - ✅ Role-based routing (admin → /dashboard/admin, client → /dashboard/onboarding)
 - ✅ Auto-admin assignment for the two owner emails via DB trigger
-- ✅ Admin clients list with progress bars and last-activity dates
+- ✅ Admin clients list with invite modal (2-step: email/role → template/sections)
 - ✅ Admin client detail view (full onboarding layout for any client)
-- ✅ Client onboarding view — 4 collapsible parts, 11 sections
-- ✅ Progress bar (X/11 sections completed)
+- ✅ ClientSectionManager — admin-only bar for section assignment and template switching
+- ✅ 6 industry-specific templates (Salud, E-commerce, Educación, Servicios, Inmobiliaria, Automotora)
+- ✅ Each template has its own sections (6–7) with industry-adapted descriptions
+- ✅ Template editor — full CRUD: edit section title/description, add sections, add parts, delete
+- ✅ Per-client section selection (admin chooses which template sections to show each client)
+- ✅ Backward compat — clients without template assignments see legacy global sections
 - ✅ Text submission per section (upsert on save)
 - ✅ File upload per section (any type, drag-drop or click)
 - ✅ File list with name, size, date, and download button
-- ✅ Admin can upload files on behalf of clients (labeled "Subido por el administrador")
-- ✅ Admin can validate sections (toggle green checkmark)
-- ✅ Client can approve admin uploads ("Validar información" checkbox)
+- ✅ Admin can upload files on behalf of clients
+- ✅ Admin can validate sections; client can approve admin uploads
 - ✅ Section status badges: Pendiente / Enviado / Validado
-- ✅ "Why we ask" explanation boxes per part
-- ✅ Disclaimer footer (confidentiality notice)
 - ✅ Supabase Storage (private bucket, signed URL downloads)
-- ✅ RLS on all 5 tables + storage policies
-- ✅ Schema + table grants correctly applied
+- ✅ RLS on all tables + storage policies + grants applied
+- ✅ **Pipeline** — two-column raw vs depured view per section
+- ✅ **AI depuration** — Anthropic API cleans raw text (requires ANTHROPIC_API_KEY)
+- ✅ **Pipeline status tracking** — Sin datos → Datos recibidos → Depurado → Enviado
+- ✅ **Prompt template editor** — per-section prompts for future Pandai webhook
 
 ---
 
 ## Known Issues / Limitations
 
-- ⚠️ **No password reset flow** — there is no "Forgot password" link or page.
-- ⚠️ **No email confirmation handling** — Supabase sends a confirmation email on
-  signup but the app doesn't check `email_confirmed_at` before allowing login. If
-  Supabase's email confirmation is enabled on the project, unconfirmed users will get
-  an auth error with no helpful message shown.
-- ⚠️ **Client profile has no company name field** — `profiles.full_name` is set to
-  the user's email by the trigger. Clients have no way to update their display name.
+- ⚠️ **No password reset flow** — no "Forgot password" page.
+- ⚠️ **No email confirmation handling** — unconfirmed users get a silent auth error.
 - ⚠️ **No file deletion UI** — files can be uploaded but not removed by users.
-- ⚠️ **No admin invite flow** — admins cannot invite clients by email. Clients must
-  sign up themselves at /signup.
-- ⚠️ **`proxy.ts` (middleware) passes everything through** — route protection is
-  entirely client-side. A determined user could briefly see the dashboard shell before
-  being redirected. Consider moving auth checks into the proxy for hardened security.
+- ⚠️ **"Enviar a Pandai" not implemented** — button exists but webhook is not wired up.
+- ⚠️ **Pipeline files not included in AI depuration** — only text content is sent to
+  the AI. Uploaded files (PDFs, etc.) are shown for download but not processed.
+- ⚠️ **`proxy.ts` passes everything through** — auth is entirely client-side.
 
 ---
 
 ## What Is Left to Build
 
 ### High priority
-- [ ] **Password reset** — `/forgot-password` page using `supabase.auth.resetPasswordForEmail()`
-- [ ] **Client profile editor** — let clients set a company name / display name
-      (add `company_name` column to `profiles`, update the trigger)
+- [ ] **Pandai webhook** — wire up "Enviar a Pandai": POST depured_text + rendered
+      prompt template to Pandai's endpoint; update pipeline_item status to 'enviado'
+- [ ] **Password reset** — `/forgot-password` using `supabase.auth.resetPasswordForEmail()`
 - [ ] **File deletion** — delete button on each file (storage + DB record)
-- [ ] **Admin invite flow** — admin enters an email, Supabase sends a magic link or
-      invite; new user lands directly in their onboarding
 
 ### Medium priority
-- [ ] **Email notifications** — notify admin when a client saves/submits; notify
-      client when admin validates a section (Supabase Edge Functions + Resend/SendGrid)
-- [ ] **Section-level completion tracking** — currently "completed" = has any content.
-      Could add an explicit `submitted_at` timestamp clients set when they're done with
-      a section.
-- [ ] **Admin notes per section** — a private text field only admins can see/edit,
-      separate from the client's submission text
-- [ ] **Bulk progress export** — admin downloads a ZIP or PDF of all submissions for
-      a client
+- [ ] **File content in AI depuration** — extract text from PDFs/docs and include
+      in the depuration prompt alongside the text submission
+- [ ] **Email notifications** — notify admin when a client submits; notify client
+      when admin validates (Supabase Edge Functions + Resend/SendGrid)
+- [ ] **Pipeline bulk actions** — depure all sections for a client in one click
+- [ ] **Admin notes per section** — private text field separate from client submission
 
 ### Low priority / polish
-- [ ] **Mobile responsiveness audit** — sidebar collapses to a hamburger menu on small screens
-- [ ] **Empty state illustrations** — nicer empty states for new clients with 0 submissions
-- [ ] **Toast notifications** — replace the inline "✓ Guardado" text with a toast system
-- [ ] **Optimistic UI** — file list updates instantly on upload instead of after DB round-trip
-- [ ] **Server-side auth in proxy.ts** — move role-based redirects into the proxy using
-      `@supabase/ssr` and cookie-based sessions for production-grade security
+- [ ] **Mobile responsiveness audit**
+- [ ] **Toast notifications** — replace inline save confirmations
+- [ ] **Server-side auth in proxy.ts** — move redirects into middleware using
+      `@supabase/ssr` and cookie-based sessions
 
 ---
 
@@ -263,8 +320,8 @@ client's Authorization header before the first query fires. See `AuthContext.tsx
    These are baked at build time — redeploy after adding them.
 
 3. **Profile shows wrong role** → The `getSession()` call in AuthContext must complete
-   before any `supabase.from()` query. If you refactor auth, do not replace `getSession()`
-   with `onAuthStateChange`-only — the HTTP client auth headers won't be set in time.
+   before any `supabase.from()` query. Do not replace `getSession()` with
+   `onAuthStateChange`-only.
 
 4. **PostgREST 403 after schema changes** → Run `NOTIFY pgrst, 'reload schema';` to
    force a schema cache reload.
@@ -272,3 +329,15 @@ client's Authorization header before the first query fires. See `AuthContext.tsx
 5. **Embedded select (`select('*, relation(*)')`) failing in production** → Use two
    separate queries instead. PostgREST's foreign-key resolution can fail on cold cache.
    See `OnboardingView.tsx` for the pattern.
+
+6. **`/api/depure` returns 503** → `ANTHROPIC_API_KEY` is not set. Add it to
+   Vercel → Project Settings → Environment Variables, then redeploy.
+
+7. **Template section titles blank in ClientSectionManager modal** → When switching
+   templates, section details must be fetched for the NEW template (not the current one).
+   `ClientSectionManager` does this via `templateSectionDetails` state loaded in
+   `openChangeTemplate()`.
+
+8. **New part not appearing in template editor** → Parts only show when they have at
+   least one section with `template_id = selected.id`. Creating a part requires also
+   creating its first section — enforced by the "Nueva parte" form UI.
