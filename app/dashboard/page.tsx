@@ -16,6 +16,8 @@ export default function DashboardPage() {
     }
     if (profile?.role === "admin") {
       router.replace("/dashboard/admin");
+    } else if (profile?.project_id) {
+      router.replace("/dashboard/portal");
     } else {
       router.replace("/dashboard/onboarding");
     }

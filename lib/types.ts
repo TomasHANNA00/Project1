@@ -7,6 +7,7 @@ export interface Profile {
   company_name: string | null
   invited_at: string | null
   template_id: number | null
+  project_id: string | null
   created_at: string
 }
 
@@ -105,4 +106,119 @@ export interface PromptTemplate {
   section_id: number
   prompt: string
   updated_at: string
+}
+
+export interface ClientProject {
+  id: string
+  client_id: string
+  template_id: string | null
+  name: string
+  created_at: string
+  started_at: string | null
+}
+
+export interface ClientPhase {
+  id: string
+  project_id: string
+  phase_template_id: string | null
+  name: string
+  phase_number: number
+}
+
+export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'requires_info' | 'validation'
+export type TaskType = 'hito' | 'info_request' | 'validation'
+export type OwnerType = 'client' | 'vambe'
+
+export interface ClientTask {
+  id: string
+  phase_id: string
+  task_template_id: string | null
+  name: string
+  task_type: TaskType
+  owner_type: OwnerType
+  owner_label: string
+  due_date: string | null
+  status: TaskStatus
+  progress: number
+  completed_at: string | null
+  completed_by: string | null
+  sort_order: number | null
+  description: string | null
+}
+
+export interface TaskValidation {
+  id: string
+  task_id: string
+  doc_url: string | null
+  doc_title: string | null
+  comments: string | null
+  validated: boolean
+  validated_at: string | null
+}
+
+export interface TaskQuestion {
+  id: string
+  task_id: string
+  question_template_id: string | null
+  question_text: string
+  placeholder: string | null
+  sort_order: number | null
+}
+
+export interface TaskResponse {
+  id: string
+  question_id: string
+  client_id: string
+  text_content: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface TaskFile {
+  id: string
+  question_id: string
+  client_id: string
+  file_name: string
+  file_path: string
+  file_size: number | null
+  mime_type: string | null
+  created_at: string
+}
+
+// ── Project template layer ────────────────────────────────────
+
+export interface ProjectTemplate {
+  id: string
+  name: string
+  industry: string | null
+  description: string | null
+  created_at: string
+  updated_at: string | null
+}
+
+export interface PhaseTemplate {
+  id: string
+  template_id: string
+  name: string
+  phase_number: number
+  description: string | null
+}
+
+export interface TaskTemplate {
+  id: string
+  phase_template_id: string
+  name: string
+  task_type: TaskType
+  owner_type: OwnerType
+  default_due_offset_days: number | null
+  sort_order: number | null
+  description: string | null
+}
+
+export interface QuestionTemplate {
+  id: string
+  task_template_id: string
+  question_text: string
+  placeholder: string | null
+  sort_order: number | null
 }
