@@ -99,7 +99,7 @@ export default function InfoRequestPanel({ task, onClose, onSaved }: InfoRequest
       progress: newProgress,
       status: newStatus,
       ...(newProgress === 100
-        ? { completed_at: now, completed_by: user!.id }
+        ? { completed_at: now, completed_by: "client" }
         : { completed_at: null, completed_by: null }),
     };
 

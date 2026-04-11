@@ -76,7 +76,7 @@ export default function ValidationPanel({ task, onClose, onSaved, isAdmin }: Val
         progress: 100,
         status: "completed",
         completed_at: now,
-        completed_by: user!.id,
+        completed_by: "client",
       })
       .eq("id", task.id);
 
