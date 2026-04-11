@@ -78,7 +78,7 @@ export default function InfoRequestPanel({ task, onClose, onSaved }: InfoRequest
     currentFiles: Record<string, TaskFile[]>,
     currentResponses: Record<string, string>,
     currentQuestions: TaskQuestion[]
-  ) => {
+  ): Promise<{ error: unknown }> => {
     let filledCount = 0;
     for (const q of currentQuestions) {
       const hasText = (currentResponses[q.id] ?? "").trim().length > 0;
@@ -91,14 +91,8 @@ export default function InfoRequestPanel({ task, onClose, onSaved }: InfoRequest
         ? Math.round((filledCount / currentQuestions.length) * 100)
         : 0;
 
-    let newStatus: string;
-    if (newProgress === 100) {
-      newStatus = "completed";
-    } else if (newProgress > 0) {
-      newStatus = "in_progress";
-    } else {
-      newStatus = task.status;
-    }
+    const newStatus =
+      newProgress === 100 ? "completed" : newProgress > 0 ? "in_progress" : task.status;
 
     const now = new Date().toISOString();
     const taskUpdate: Record<string, unknown> = {
@@ -109,41 +103,73 @@ export default function InfoRequestPanel({ task, onClose, onSaved }: InfoRequest
         : { completed_at: null, completed_by: null }),
     };
 
-    return supabase.from("client_tasks").update(taskUpdate).eq("id", task.id);
+    console.log("[portal] Step 3: updating client_tasks", {
+      taskId: task.id,
+      newProgress,
+      newStatus,
+    });
+
+    // Explicitly await so exceptions surface here rather than in the caller
+    const { error } = await supabase
+      .from("client_tasks")
+      .update(taskUpdate)
+      .eq("id", task.id);
+
+    if (error) console.error("[portal] client_tasks update error:", error);
+    else console.log("[portal] client_tasks updated OK");
+
+    return { error };
   };
 
   const handleSave = async () => {
     setSaving(true);
-    let hasError = false;
+    let lastError: { code?: string; message?: string } | null = null;
 
-    // 1. Upsert each response
-    for (const q of questions) {
-      const text = responses[q.id] ?? "";
-      const existing = existingResponses.get(q.id);
+    try {
+      const now = new Date().toISOString();
+      // Step 1: Upsert each response
+      for (const q of questions) {
+        const text = responses[q.id] ?? "";
+        const existing = existingResponses.get(q.id);
+        if (!existing && !text.trim()) continue; // Skip: nothing new to save
 
-      if (existing) {
         const { error } = await supabase
           .from("task_responses")
-          .update({ text_content: text, updated_at: new Date().toISOString() })
-          .eq("id", existing.id);
-        if (error) { hasError = true; break; }
-      } else if (text.trim()) {
-        const { error } = await supabase
-          .from("task_responses")
-          .insert({ question_id: q.id, client_id: user!.id, text_content: text });
-        if (error) { hasError = true; break; }
+          .upsert(
+            {
+              question_id: q.id,
+              client_id: user!.id,
+              text_content: text,
+              updated_at: now,
+            },
+            { onConflict: "question_id,client_id" }
+          );
+        if (error) {
+          console.error("[portal] task_responses upsert error:", error);
+          lastError = error;
+          break;
+        }
       }
-    }
 
-    // 2. Calculate and update client_tasks progress
-    if (!hasError) {
-      const { error: taskError } = await updateTaskProgress(files, responses, questions);
-      if (taskError) hasError = true;
+      // Step 2: Update task progress (only if upserts succeeded)
+      if (!lastError) {
+        const { error: taskError } = await updateTaskProgress(files, responses, questions);
+        if (taskError) {
+          console.error("[portal] client_tasks update error:", taskError);
+          lastError = taskError as { code?: string; message?: string };
+        }
+      }
+    } catch (err) {
+      console.error("[portal] handleSave threw:", err);
+      lastError = { message: String(err) };
     }
 
     setSaving(false);
-    if (hasError) {
-      showToast("Error al guardar. Intenta de nuevo.", "error");
+    if (lastError) {
+      const detail = lastError.code
+        ? `${lastError.code}: ${lastError.message}`
+        : lastError.message ?? "Error desconocido";
+      showToast(`Error al guardar — ${detail}`, "error");
     } else {
       showToast("Respuestas guardadas correctamente.");
       onSaved();
