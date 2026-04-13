@@ -72,6 +72,7 @@ export default function AdminClientDetailPage() {
   const [templatePreview, setTemplatePreview] = useState<{ phases: number; tasks: number } | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [recreating, setRecreating] = useState(false);
+  const [recreateError, setRecreateError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
@@ -363,85 +364,92 @@ export default function AdminClientDetailPage() {
   const handleRecreateConfirm = async () => {
     if (!selectedTemplateId) return;
     setRecreating(true);
+    setRecreateError(null);
 
-    // 1. Get current project
-    const { data: project } = await supabase
-      .from("client_projects")
-      .select("id")
-      .eq("client_id", clientId)
-      .maybeSingle();
-
-    if (project) {
-      // 2. Cascade delete: storage → task_files → task_responses → task_questions → task_validations → client_tasks → phase_files → client_phases → client_projects
-      const { data: phasesData } = await supabase
-        .from("client_phases")
+    try {
+      // 1. Get current project
+      const { data: project } = await supabase
+        .from("client_projects")
         .select("id")
-        .eq("project_id", project.id);
+        .eq("client_id", clientId)
+        .maybeSingle();
 
-      const phaseIds = (phasesData ?? []).map((p) => p.id);
-
-      if (phaseIds.length > 0) {
-        const { data: tasksData } = await supabase
-          .from("client_tasks")
+      if (project) {
+        // 2. Cascade delete: storage → task_files → task_responses → task_questions → task_validations → client_tasks → phase_files → client_phases → client_projects
+        const { data: phasesData } = await supabase
+          .from("client_phases")
           .select("id")
-          .in("phase_id", phaseIds);
-        const taskIds = (tasksData ?? []).map((t) => t.id);
+          .eq("project_id", project.id);
 
-        if (taskIds.length > 0) {
-          const { data: questionsData } = await supabase
-            .from("task_questions")
+        const phaseIds = (phasesData ?? []).map((p) => p.id);
+
+        if (phaseIds.length > 0) {
+          const { data: tasksData } = await supabase
+            .from("client_tasks")
             .select("id")
-            .in("task_id", taskIds);
-          const questionIds = (questionsData ?? []).map((q) => q.id);
+            .in("phase_id", phaseIds);
+          const taskIds = (tasksData ?? []).map((t) => t.id);
 
-          if (questionIds.length > 0) {
-            const { data: filesToDelete } = await supabase
-              .from("task_files")
-              .select("file_path")
-              .in("question_id", questionIds);
-            if (filesToDelete && filesToDelete.length > 0) {
-              await supabase.storage
-                .from("submissions")
-                .remove(filesToDelete.map((f) => f.file_path));
+          if (taskIds.length > 0) {
+            const { data: questionsData } = await supabase
+              .from("task_questions")
+              .select("id")
+              .in("task_id", taskIds);
+            const questionIds = (questionsData ?? []).map((q) => q.id);
+
+            if (questionIds.length > 0) {
+              const { data: filesToDelete } = await supabase
+                .from("task_files")
+                .select("file_path")
+                .in("question_id", questionIds);
+              if (filesToDelete && filesToDelete.length > 0) {
+                await supabase.storage
+                  .from("submissions")
+                  .remove(filesToDelete.map((f) => f.file_path));
+              }
+              await supabase.from("task_files").delete().in("question_id", questionIds);
+              await supabase.from("task_responses").delete().in("question_id", questionIds);
+              await supabase.from("task_questions").delete().in("task_id", taskIds);
             }
-            await supabase.from("task_files").delete().in("question_id", questionIds);
-            await supabase.from("task_responses").delete().in("question_id", questionIds);
-            await supabase.from("task_questions").delete().in("task_id", taskIds);
+
+            await supabase.from("task_validations").delete().in("task_id", taskIds);
+            await supabase.from("client_tasks").delete().in("phase_id", phaseIds);
           }
 
-          await supabase.from("task_validations").delete().in("task_id", taskIds);
-          await supabase.from("client_tasks").delete().in("phase_id", phaseIds);
+          // Delete phase files from storage + db
+          const { data: phaseFilesToDelete } = await supabase
+            .from("phase_files")
+            .select("file_path")
+            .in("phase_id", phaseIds);
+          if (phaseFilesToDelete && phaseFilesToDelete.length > 0) {
+            await supabase.storage
+              .from("submissions")
+              .remove(phaseFilesToDelete.map((f) => f.file_path));
+          }
+          await supabase.from("phase_files").delete().in("phase_id", phaseIds);
+          await supabase.from("client_phases").delete().eq("project_id", project.id);
         }
 
-        // Delete phase files from storage + db
-        const { data: phaseFilesToDelete } = await supabase
-          .from("phase_files")
-          .select("file_path")
-          .in("phase_id", phaseIds);
-        if (phaseFilesToDelete && phaseFilesToDelete.length > 0) {
-          await supabase.storage
-            .from("submissions")
-            .remove(phaseFilesToDelete.map((f) => f.file_path));
-        }
-        await supabase.from("phase_files").delete().in("phase_id", phaseIds);
-        await supabase.from("client_phases").delete().eq("project_id", project.id);
+        await supabase.from("client_projects").delete().eq("id", project.id);
+        await supabase.from("profiles").update({ project_id: null }).eq("id", clientId);
       }
 
-      await supabase.from("client_projects").delete().eq("id", project.id);
-      await supabase.from("profiles").update({ project_id: null }).eq("id", clientId);
+      // 3. Create new project from selected template
+      const ownerLabel = (clientProfile?.company_name ?? "CLIENTE").toUpperCase();
+      const companyName = clientProfile?.company_name ?? "Cliente";
+      await createProjectFromTemplate(clientId, selectedTemplateId, ownerLabel, companyName);
+
+      setRecreateStep(null);
+      setRecreateStats(null);
+      setSelectedTemplateId(null);
+      setTemplatePreview(null);
+      await load();
+    } catch (err) {
+      console.error("Error recreating project:", err);
+      setRecreateError("Ocurrió un error. El proyecto puede estar en un estado inconsistente. Contacta soporte.");
+    } finally {
+      setRecreating(false);
     }
-
-    // 3. Create new project from selected template
-    const ownerLabel = (clientProfile?.company_name ?? "CLIENTE").toUpperCase();
-    const companyName = clientProfile?.company_name ?? "Cliente";
-    await createProjectFromTemplate(clientId, selectedTemplateId, ownerLabel, companyName);
-
-    setRecreating(false);
-    setRecreateStep(null);
-    setRecreateStats(null);
-    setSelectedTemplateId(null);
-    setTemplatePreview(null);
-    await load();
   };
 
   const getPhaseMaxSortOrder = (phaseId: string): number => {
@@ -577,8 +585,8 @@ export default function AdminClientDetailPage() {
               Exportar
             </button>
           )}
-          {/* Settings menu (always visible for admin) */}
-          {!loading && (
+          {/* Settings menu — only shown when client has an active project */}
+          {!loading && hasProject && (
             <div ref={settingsMenuRef} style={{ position: "relative" }}>
               <button
                 onClick={() => setShowSettingsMenu((v) => !v)}
@@ -926,7 +934,7 @@ export default function AdminClientDetailPage() {
             alignItems: "center",
             justifyContent: "center",
           }}
-          onClick={(e) => { if (e.target === e.currentTarget && !recreating) setRecreateStep(null); }}
+          onClick={(e) => { if (e.target === e.currentTarget && !recreating) { setRecreateStep(null); setRecreateError(null); } }}
         >
           <div
             style={{
@@ -1011,9 +1019,26 @@ export default function AdminClientDetailPage() {
               </div>
             )}
 
+            {recreateError && (
+              <div
+                style={{
+                  marginBottom: "16px",
+                  padding: "10px 14px",
+                  borderRadius: "8px",
+                  background: "#FEF2F2",
+                  border: "1px solid #FECACA",
+                  fontSize: "12px",
+                  color: "#DC2626",
+                  lineHeight: 1.5,
+                }}
+              >
+                {recreateError}
+              </div>
+            )}
+
             <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
               <button
-                onClick={() => { if (!recreating) { setRecreateStep("warning"); setSelectedTemplateId(null); setTemplatePreview(null); } }}
+                onClick={() => { if (!recreating) { setRecreateStep("warning"); setSelectedTemplateId(null); setTemplatePreview(null); setRecreateError(null); } }}
                 disabled={recreating}
                 style={{
                   padding: "8px 18px",

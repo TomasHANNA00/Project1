@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MyApp",
-  description: "MyApp dashboard",
+  title: "Vambe",
+  description: "Vambe Client Portal",
 };
 
 export default function RootLayout({
