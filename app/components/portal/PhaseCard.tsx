@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import type { ClientPhase, ClientTask, TaskValidation } from "@/lib/types";
+import type { ClientPhase, ClientTask, PhaseFile, TaskValidation } from "@/lib/types";
 import TaskItem from "./TaskItem";
+import PhaseFiles from "./PhaseFiles";
 
 interface PhaseCardProps {
   phase: ClientPhase;
@@ -15,6 +16,12 @@ interface PhaseCardProps {
   onAddTask?: (phaseId: string) => void;
   onDueDateChange?: (taskId: string, date: string) => void;
   onOwnerLabelChange?: (taskId: string, label: string) => void;
+  onNameChange?: (taskId: string, name: string) => void;
+  onDeleteTask?: (taskId: string) => void;
+  onOwnerTypeChange?: (taskId: string, ownerType: "client" | "vambe", label: string) => void;
+  onPhaseNameChange?: (phaseId: string, name: string) => void;
+  phaseFiles?: PhaseFile[];
+  clientId?: string;
 }
 
 export default function PhaseCard({
@@ -28,8 +35,17 @@ export default function PhaseCard({
   onAddTask,
   onDueDateChange,
   onOwnerLabelChange,
+  onNameChange,
+  onDeleteTask,
+  onOwnerTypeChange,
+  onPhaseNameChange,
+  phaseFiles = [],
+  clientId,
 }: PhaseCardProps) {
   const [open, setOpen] = useState(defaultOpen);
+  const [editingPhaseName, setEditingPhaseName] = useState(false);
+  const [phaseNameValue, setPhaseNameValue] = useState(phase.name);
+
   const completedCount = tasks.filter((t) => t.status === "completed").length;
   const isDone = progress >= 100;
   const hasProgress = progress > 0;
@@ -46,7 +62,9 @@ export default function PhaseCard({
     >
       {/* Header row */}
       <div
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          if (!editingPhaseName) setOpen(!open);
+        }}
         className="hover:bg-[#F8FAFC] transition-colors"
         style={{
           display: "flex",
@@ -94,19 +112,76 @@ export default function PhaseCard({
 
         {/* Name + progress bar */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p
-            style={{
-              fontSize: "15px",
-              fontWeight: 600,
-              color: "#0F1629",
-              marginBottom: "8px",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {phase.name}
-          </p>
+          {editingPhaseName && isAdmin ? (
+            <input
+              type="text"
+              value={phaseNameValue}
+              autoFocus
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setPhaseNameValue(e.target.value)}
+              onBlur={() => {
+                setEditingPhaseName(false);
+                const trimmed = phaseNameValue.trim();
+                if (trimmed && trimmed !== phase.name) {
+                  onPhaseNameChange?.(phase.id, trimmed);
+                } else {
+                  setPhaseNameValue(phase.name);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                if (e.key === "Escape") {
+                  setPhaseNameValue(phase.name);
+                  setEditingPhaseName(false);
+                }
+              }}
+              style={{
+                width: "100%",
+                fontSize: "15px",
+                fontWeight: 600,
+                color: "#0F1629",
+                border: "1px solid #3B82F6",
+                borderRadius: "6px",
+                padding: "3px 8px",
+                outline: "none",
+                fontFamily: "inherit",
+                background: "#F0F9FF",
+                marginBottom: "8px",
+              }}
+            />
+          ) : (
+            <p
+              onClick={(e) => {
+                if (isAdmin) {
+                  e.stopPropagation();
+                  setEditingPhaseName(true);
+                }
+              }}
+              title={isAdmin ? "Clic para editar nombre de la fase" : undefined}
+              style={{
+                fontSize: "15px",
+                fontWeight: 600,
+                color: "#0F1629",
+                marginBottom: "8px",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                cursor: isAdmin ? "text" : "default",
+                padding: isAdmin ? "3px 6px" : "0",
+                borderRadius: "4px",
+                border: isAdmin ? "1px dashed transparent" : "none",
+                transition: "border-color 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                if (isAdmin) (e.currentTarget as HTMLParagraphElement).style.borderColor = "#CBD5E1";
+              }}
+              onMouseLeave={(e) => {
+                if (isAdmin) (e.currentTarget as HTMLParagraphElement).style.borderColor = "transparent";
+              }}
+            >
+              {phaseNameValue}
+            </p>
+          )}
           <div
             style={{ display: "flex", alignItems: "center", gap: "10px" }}
           >
@@ -181,6 +256,15 @@ export default function PhaseCard({
       {/* Task list */}
       {open && (
         <div style={{ borderTop: "1px solid #F1F5F9" }}>
+          {/* Phase-level file uploads */}
+          {clientId && (
+            <PhaseFiles
+              phaseId={phase.id}
+              clientId={clientId}
+              initialFiles={phaseFiles}
+            />
+          )}
+
           {tasks.length === 0 ? (
             <p
               style={{
@@ -201,6 +285,9 @@ export default function PhaseCard({
                 onCheckboxClick={onCheckboxClick}
                 onDueDateChange={onDueDateChange}
                 onOwnerLabelChange={onOwnerLabelChange}
+                onNameChange={onNameChange}
+                onDeleteTask={onDeleteTask}
+                onOwnerTypeChange={onOwnerTypeChange}
               />
             ))
           )}

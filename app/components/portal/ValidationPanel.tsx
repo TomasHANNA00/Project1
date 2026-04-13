@@ -25,6 +25,11 @@ export default function ValidationPanel({ task, onClose, onSaved, isAdmin }: Val
   const [editDocUrl, setEditDocUrl] = useState(validation?.doc_url ?? "");
   const [editDocTitle, setEditDocTitle] = useState(validation?.doc_title ?? "");
 
+  // Description editing (admin only)
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [descriptionValue, setDescriptionValue] = useState(task.description ?? "");
+  const [savingDescription, setSavingDescription] = useState(false);
+
   useEffect(() => {
     requestAnimationFrame(() => setVisible(true));
   }, []);
@@ -32,6 +37,22 @@ export default function ValidationPanel({ task, onClose, onSaved, isAdmin }: Val
   const handleClose = () => {
     setVisible(false);
     setTimeout(onClose, 350);
+  };
+
+  const handleSaveDescription = async () => {
+    setSavingDescription(true);
+    const { error } = await supabase
+      .from("client_tasks")
+      .update({ description: descriptionValue.trim() || null })
+      .eq("id", task.id);
+    setSavingDescription(false);
+    if (error) {
+      showToast("Error al guardar la descripción.", "error");
+    } else {
+      showToast("Descripción actualizada.");
+      setEditingDescription(false);
+      onSaved?.();
+    }
   };
 
   const handleSaveDoc = async () => {
@@ -151,17 +172,85 @@ export default function ValidationPanel({ task, onClose, onSaved, isAdmin }: Val
             <p style={{ fontSize: "16px", fontWeight: 700, color: "#0F1629" }}>
               {task.name}
             </p>
-            {task.description && (
-              <p
-                style={{
-                  marginTop: "6px",
-                  fontSize: "13px",
-                  color: "#64748B",
-                  lineHeight: "1.5",
-                }}
-              >
-                {task.description}
-              </p>
+            {isAdmin ? (
+              editingDescription ? (
+                <div style={{ marginTop: "8px" }}>
+                  <textarea
+                    value={descriptionValue}
+                    autoFocus
+                    onChange={(e) => setDescriptionValue(e.target.value)}
+                    rows={3}
+                    style={{
+                      width: "100%",
+                      fontSize: "13px",
+                      color: "#64748B",
+                      lineHeight: "1.5",
+                      border: "1px solid #3B82F6",
+                      borderRadius: "6px",
+                      padding: "6px 8px",
+                      outline: "none",
+                      resize: "vertical",
+                      fontFamily: "inherit",
+                      boxSizing: "border-box",
+                      background: "#F0F9FF",
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        setDescriptionValue(task.description ?? "");
+                        setEditingDescription(false);
+                      }
+                    }}
+                  />
+                  <div style={{ display: "flex", gap: "6px", marginTop: "6px" }}>
+                    <button
+                      onClick={() => { setDescriptionValue(task.description ?? ""); setEditingDescription(false); }}
+                      style={{ padding: "4px 10px", borderRadius: "6px", border: "1px solid #E2E8F0", background: "white", fontSize: "12px", color: "#64748B", cursor: "pointer" }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={handleSaveDescription}
+                      disabled={savingDescription}
+                      style={{ padding: "4px 10px", borderRadius: "6px", border: "none", background: "#4F46E5", fontSize: "12px", fontWeight: 600, color: "white", cursor: savingDescription ? "not-allowed" : "pointer" }}
+                    >
+                      {savingDescription ? "Guardando..." : "Guardar"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p
+                  onClick={() => setEditingDescription(true)}
+                  title="Clic para editar descripción"
+                  style={{
+                    marginTop: "6px",
+                    fontSize: "13px",
+                    color: descriptionValue ? "#64748B" : "#CBD5E1",
+                    lineHeight: "1.5",
+                    cursor: "text",
+                    padding: "4px 6px",
+                    borderRadius: "4px",
+                    border: "1px dashed transparent",
+                    transition: "border-color 0.15s",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#CBD5E1")}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = "transparent")}
+                >
+                  {descriptionValue || "Agregar descripción..."}
+                </p>
+              )
+            ) : (
+              task.description && (
+                <p
+                  style={{
+                    marginTop: "6px",
+                    fontSize: "13px",
+                    color: "#64748B",
+                    lineHeight: "1.5",
+                  }}
+                >
+                  {task.description}
+                </p>
+              )
             )}
           </div>
           <button

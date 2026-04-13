@@ -72,6 +72,7 @@ Owner types: `client`, `vambe`
 | `task_responses` | id uuid, question_id uuid FK, client_id uuid FK, text_content, created_at, updated_at — UNIQUE(question_id, client_id) |
 | `task_files` | id uuid, question_id uuid FK, client_id uuid FK, file_name, file_path, file_size bigint, mime_type, created_at |
 | `task_validations` | id uuid, task_id uuid FK, doc_url, doc_title, comments, validated boolean, validated_at |
+| `phase_files` | id uuid, phase_id uuid FK → client_phases, client_id uuid FK → profiles, file_name, file_path, file_size bigint, mime_type, created_at — Phase-level global file uploads |
 
 **Progress model:** task-level `progress` stored in `client_tasks`. Phase/total progress computed client-side as averages.
 
@@ -105,6 +106,7 @@ Owner types: `client`, `vambe`
 - Client instance tables (`client_projects`, `client_phases`, `client_tasks`, `task_questions`): SELECT for project owner + admin ALL.
 - `task_responses`: client INSERT/UPDATE/SELECT own rows + admin ALL.
 - `task_files`: client INSERT/SELECT/DELETE own rows + admin ALL.
+- `phase_files`: client INSERT/SELECT/DELETE own rows + admin ALL.
 - `task_validations`: admin ALL, client SELECT.
 
 ### Grants (critical — new tables need explicit grants)
@@ -133,6 +135,8 @@ GRANT ALL ON public.task_questions    TO authenticated;
 GRANT ALL ON public.task_responses    TO authenticated;
 GRANT ALL ON public.task_files        TO authenticated;
 GRANT ALL ON public.task_validations  TO authenticated;
+GRANT ALL ON public.phase_files       TO authenticated;
+GRANT SELECT ON public.phase_files    TO anon;
 ```
 
 **Root cause of every 403 ever encountered:** missing `GRANT USAGE ON SCHEMA public`.
@@ -142,6 +146,7 @@ GRANT ALL ON public.task_validations  TO authenticated;
 - **Bucket:** `submissions` (private, `public = false`) — **NOT** `private`
 - **Legacy upload path:** `{client_id}/{section_id}/{timestamp}_{filename}`
 - **New upload path:** `{client_id}/{question_id}/{timestamp}_{filename}`
+- **Phase file upload path:** `{client_id}/phases/{phase_id}/{timestamp}_{filename}`
 - **Storage RLS:** clients can read/write their own folder; admins can read/write any path
 - **Download:** signed URLs (60 s expiry) via `createSignedUrl()`
 

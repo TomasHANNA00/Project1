@@ -28,7 +28,7 @@ export default function PortalHeader({ companyName, totalProgress }: PortalHeade
         }}
       >
         {/* Left: Logo */}
-        <Image src="/logo-vambe.png" alt="Vambe" height={40} width={0} style={{ width: "auto", display: "block" }} priority />
+        <Image src="/logo-vambe.png" alt="Vambe" height={44} width={140} style={{ width: "auto", height: "44px", display: "block" }} priority />
 
         {/* Right: Company badge + progress */}
         <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>

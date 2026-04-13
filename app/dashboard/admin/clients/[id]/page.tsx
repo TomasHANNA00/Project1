@@ -5,7 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/app/contexts/AuthContext";
-import type { ClientPhase, ClientTask, TaskValidation } from "@/lib/types";
+import type { ClientPhase, ClientTask, PhaseFile, TaskValidation } from "@/lib/types";
 import PortalProviders from "@/app/components/portal/PortalProviders";
 import PortalHeader from "@/app/components/portal/PortalHeader";
 import PhaseSidebar from "@/app/components/portal/PhaseSidebar";
@@ -16,6 +16,7 @@ import AddTaskModal, { type AddTaskData } from "@/app/components/portal/AddTaskM
 
 interface PhaseWithTasks extends ClientPhase {
   tasks: (ClientTask & { validation?: TaskValidation })[];
+  files: PhaseFile[];
 }
 
 interface ClientProfile {
@@ -123,8 +124,20 @@ export default function AdminClientDetailPage() {
       );
     }
 
+    const { data: phaseFilesData } = await supabase
+      .from("phase_files")
+      .select("*")
+      .in("phase_id", phaseIds);
+
+    const phaseFilesMap = new Map<string, PhaseFile[]>();
+    for (const f of phaseFilesData ?? []) {
+      if (!phaseFilesMap.has(f.phase_id)) phaseFilesMap.set(f.phase_id, []);
+      phaseFilesMap.get(f.phase_id)!.push(f as PhaseFile);
+    }
+
     const assembled: PhaseWithTasks[] = phasesData.map((phase) => ({
       ...phase,
+      files: phaseFilesMap.get(phase.id) ?? [],
       tasks: tasks
         .filter((t) => t.phase_id === phase.id)
         .map((t) => ({ ...t, validation: validationMap.get(t.id) })),
@@ -173,6 +186,61 @@ export default function AdminClientDetailPage() {
     await supabase
       .from("client_tasks")
       .update({ owner_label: label })
+      .eq("id", taskId);
+    await load();
+  };
+
+  const handleNameChange = async (taskId: string, name: string) => {
+    await supabase
+      .from("client_tasks")
+      .update({ name })
+      .eq("id", taskId);
+    await load();
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    // Cascade: task_files (storage + db) → task_responses → task_questions → task_validations → client_tasks
+    const { data: questions } = await supabase
+      .from("task_questions")
+      .select("id")
+      .eq("task_id", taskId);
+
+    if (questions && questions.length > 0) {
+      const qIds = questions.map((q) => q.id);
+
+      // Remove storage files
+      const { data: filesToDelete } = await supabase
+        .from("task_files")
+        .select("file_path")
+        .in("question_id", qIds);
+      if (filesToDelete && filesToDelete.length > 0) {
+        await supabase.storage
+          .from("submissions")
+          .remove(filesToDelete.map((f) => f.file_path));
+      }
+
+      await supabase.from("task_files").delete().in("question_id", qIds);
+      await supabase.from("task_responses").delete().in("question_id", qIds);
+      await supabase.from("task_questions").delete().eq("task_id", taskId);
+    }
+
+    await supabase.from("task_validations").delete().eq("task_id", taskId);
+    await supabase.from("client_tasks").delete().eq("id", taskId);
+    await load();
+  };
+
+  const handlePhaseNameChange = async (phaseId: string, name: string) => {
+    await supabase
+      .from("client_phases")
+      .update({ name })
+      .eq("id", phaseId);
+    await load();
+  };
+
+  const handleOwnerTypeChange = async (taskId: string, ownerType: "client" | "vambe", label: string) => {
+    await supabase
+      .from("client_tasks")
+      .update({ owner_type: ownerType, owner_label: label })
       .eq("id", taskId);
     await load();
   };
@@ -363,7 +431,7 @@ export default function AdminClientDetailPage() {
                   <path d="M7 6v4M7 4.5v.5" stroke="#4F46E5" strokeWidth="1.5" strokeLinecap="round" />
                 </svg>
                 <span style={{ fontSize: "12px", color: "#4F46E5", fontWeight: 500 }}>
-                  Vista de administrador — puedes marcar tareas, editar fechas y etiquetas, y agregar tareas nuevas.
+                  Vista de administrador — edita nombres, fechas, propietarios, fases y preguntas. Haz clic en cualquier texto para editarlo.
                 </span>
               </div>
 
@@ -389,6 +457,12 @@ export default function AdminClientDetailPage() {
                       onAddTask={(phaseId) => setAddTaskPhaseId(phaseId)}
                       onDueDateChange={handleDueDateChange}
                       onOwnerLabelChange={handleOwnerLabelChange}
+                      onNameChange={handleNameChange}
+                      onDeleteTask={handleDeleteTask}
+                      onOwnerTypeChange={handleOwnerTypeChange}
+                      onPhaseNameChange={handlePhaseNameChange}
+                      phaseFiles={phase.files}
+                      clientId={clientId}
                     />
                   </div>
                 );
@@ -404,6 +478,7 @@ export default function AdminClientDetailPage() {
           task={selectedTask}
           onClose={() => setSelectedTask(null)}
           onSaved={load}
+          isAdmin={true}
         />
       )}
       {selectedTask?.task_type === "validation" && (

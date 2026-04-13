@@ -222,3 +222,14 @@ export interface QuestionTemplate {
   placeholder: string | null
   sort_order: number | null
 }
+
+export interface PhaseFile {
+  id: string
+  phase_id: string
+  client_id: string
+  file_name: string
+  file_path: string
+  file_size: number | null
+  mime_type: string | null
+  created_at: string
+}

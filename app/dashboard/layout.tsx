@@ -121,7 +121,7 @@ export default function DashboardLayout({
       <aside className="flex w-60 shrink-0 flex-col border-r border-zinc-200 bg-white">
         {/* Logo */}
         <div className="flex h-14 items-center border-b border-zinc-200 px-5 gap-2">
-          <Image src="/logo-vambe.png" alt="Vambe" height={28} width={90} style={{ objectFit: "contain" }} />
+          <Image src="/logo-vambe.png" alt="Vambe" height={32} width={100} style={{ objectFit: "contain" }} />
           {isAdmin && (
             <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
               Admin

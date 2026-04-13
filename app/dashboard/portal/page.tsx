@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/app/contexts/AuthContext";
-import type { ClientPhase, ClientTask, TaskValidation } from "@/lib/types";
+import type { ClientPhase, ClientTask, PhaseFile, TaskValidation } from "@/lib/types";
 import PortalHeader from "@/app/components/portal/PortalHeader";
 import PhaseSidebar from "@/app/components/portal/PhaseSidebar";
 import PhaseCard from "@/app/components/portal/PhaseCard";
@@ -13,6 +13,7 @@ import ValidationPanel from "@/app/components/portal/ValidationPanel";
 
 interface PhaseWithTasks extends ClientPhase {
   tasks: (ClientTask & { validation?: TaskValidation })[];
+  files: PhaseFile[];
 }
 
 function calcPhaseProgress(tasks: ClientTask[]): number {
@@ -116,8 +117,20 @@ export default function PortalPage() {
       );
     }
 
+    const { data: phaseFilesData } = await supabase
+      .from("phase_files")
+      .select("*")
+      .in("phase_id", phaseIds);
+
+    const phaseFilesMap = new Map<string, PhaseFile[]>();
+    for (const f of phaseFilesData ?? []) {
+      if (!phaseFilesMap.has(f.phase_id)) phaseFilesMap.set(f.phase_id, []);
+      phaseFilesMap.get(f.phase_id)!.push(f as PhaseFile);
+    }
+
     const assembled: PhaseWithTasks[] = phasesData.map((phase) => ({
       ...phase,
+      files: phaseFilesMap.get(phase.id) ?? [],
       tasks: tasks
         .filter((t) => t.phase_id === phase.id)
         .map((t) => ({ ...t, validation: validationMap.get(t.id) })),
@@ -302,6 +315,8 @@ export default function PortalPage() {
                           task as ClientTask & { validation?: TaskValidation }
                         )
                       }
+                      phaseFiles={phase.files}
+                      clientId={user!.id}
                     />
                   </div>
                 );
