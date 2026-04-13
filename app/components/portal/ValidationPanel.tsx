@@ -19,6 +19,8 @@ export default function ValidationPanel({ task, onClose, onSaved, isAdmin }: Val
   const [visible, setVisible] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingDoc, setSavingDoc] = useState(false);
+  const [invalidating, setInvalidating] = useState(false);
+  const [showInvalidateConfirm, setShowInvalidateConfirm] = useState(false);
   const validation = task.validation;
   const isValidated = validation?.validated ?? false;
 
@@ -72,6 +74,39 @@ export default function ValidationPanel({ task, onClose, onSaved, isAdmin }: Val
       showToast("Documento guardado.");
       onSaved?.();
     }
+  };
+
+  const handleInvalidate = async () => {
+    if (!validation) return;
+    setInvalidating(true);
+
+    const { error: valError } = await supabase
+      .from("task_validations")
+      .update({ validated: false, validated_at: null })
+      .eq("id", validation.id);
+
+    if (valError) {
+      showToast("Error al invalidar. Intenta de nuevo.", "error");
+      setInvalidating(false);
+      return;
+    }
+
+    const { error: taskError } = await supabase
+      .from("client_tasks")
+      .update({ progress: 0, status: "pending", completed_at: null, completed_by: null })
+      .eq("id", task.id);
+
+    if (taskError) {
+      showToast("Error al actualizar la tarea.", "error");
+      setInvalidating(false);
+      return;
+    }
+
+    setInvalidating(false);
+    setShowInvalidateConfirm(false);
+    showToast("Validación revocada.");
+    onSaved?.();
+    handleClose();
   };
 
   const handleValidate = async () => {
@@ -615,28 +650,103 @@ export default function ValidationPanel({ task, onClose, onSaved, isAdmin }: Val
         {/* Footer */}
         {validation && (
           <div style={{ padding: "16px 24px", borderTop: "1px solid #E2E8F0" }}>
-            <button
-              onClick={handleValidate}
-              disabled={isValidated || saving}
-              style={{
-                width: "100%",
-                padding: "12px",
-                borderRadius: "8px",
-                background: isValidated ? "#F1F5F9" : saving ? "#4B5563" : "#0F1629",
-                border: isValidated ? "1.5px solid #E2E8F0" : "none",
-                color: isValidated ? "#94A3B8" : "white",
-                fontSize: "14px",
-                fontWeight: 600,
-                cursor: isValidated || saving ? "not-allowed" : "pointer",
-                transition: "background 0.15s",
-              }}
-            >
-              {saving
-                ? "Validando..."
-                : isValidated
-                ? "Ya validado"
-                : "Validar documento"}
-            </button>
+            {/* Invalidate confirmation */}
+            {showInvalidateConfirm ? (
+              <div
+                style={{
+                  padding: "14px",
+                  background: "#FEF2F2",
+                  borderRadius: "10px",
+                  border: "1.5px solid #FECACA",
+                  marginBottom: "10px",
+                }}
+              >
+                <p style={{ fontSize: "13px", fontWeight: 600, color: "#DC2626", marginBottom: "6px" }}>
+                  ¿Confirmar invalidación?
+                </p>
+                <p style={{ fontSize: "12px", color: "#B91C1C", marginBottom: "12px", lineHeight: "1.5" }}>
+                  El proceso de validación deberá repetirse.
+                </p>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    onClick={() => setShowInvalidateConfirm(false)}
+                    style={{
+                      flex: 1,
+                      padding: "8px",
+                      borderRadius: "6px",
+                      border: "1px solid #E2E8F0",
+                      background: "white",
+                      fontSize: "12px",
+                      fontWeight: 500,
+                      color: "#64748B",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={handleInvalidate}
+                    disabled={invalidating}
+                    style={{
+                      flex: 1,
+                      padding: "8px",
+                      borderRadius: "6px",
+                      border: "none",
+                      background: invalidating ? "#4B5563" : "#DC2626",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      color: "white",
+                      cursor: invalidating ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {invalidating ? "Invalidando..." : "Sí, invalidar"}
+                  </button>
+                </div>
+              </div>
+            ) : isValidated ? (
+              <button
+                onClick={() => setShowInvalidateConfirm(true)}
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "8px",
+                  background: "none",
+                  border: "1.5px solid #FECACA",
+                  color: "#EF4444",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  transition: "background 0.15s, border-color 0.15s",
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "#FEF2F2";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "none";
+                }}
+              >
+                Invalidar validación
+              </button>
+            ) : (
+              <button
+                onClick={handleValidate}
+                disabled={saving}
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  borderRadius: "8px",
+                  background: saving ? "#4B5563" : "#0F1629",
+                  border: "none",
+                  color: "white",
+                  fontSize: "14px",
+                  fontWeight: 600,
+                  cursor: saving ? "not-allowed" : "pointer",
+                  transition: "background 0.15s",
+                }}
+              >
+                {saving ? "Validando..." : "Validar documento"}
+              </button>
+            )}
           </div>
         )}
       </div>

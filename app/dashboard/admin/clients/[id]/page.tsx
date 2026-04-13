@@ -5,7 +5,8 @@ import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/app/contexts/AuthContext";
-import type { ClientPhase, ClientTask, PhaseFile, TaskValidation } from "@/lib/types";
+import type { ClientPhase, ClientTask, PhaseFile, ProjectTemplate, TaskValidation } from "@/lib/types";
+import { createProjectFromTemplate } from "@/lib/createProject";
 import PortalProviders from "@/app/components/portal/PortalProviders";
 import PortalHeader from "@/app/components/portal/PortalHeader";
 import PhaseSidebar from "@/app/components/portal/PhaseSidebar";
@@ -13,6 +14,7 @@ import PhaseCard from "@/app/components/portal/PhaseCard";
 import InfoRequestPanel from "@/app/components/portal/InfoRequestPanel";
 import ValidationPanel from "@/app/components/portal/ValidationPanel";
 import AddTaskModal, { type AddTaskData } from "@/app/components/portal/AddTaskModal";
+import ExportModal from "@/app/components/portal/ExportModal";
 
 interface PhaseWithTasks extends ClientPhase {
   tasks: (ClientTask & { validation?: TaskValidation })[];
@@ -51,6 +53,7 @@ export default function AdminClientDetailPage() {
   const params = useParams<{ id: string }>();
   const clientId = params.id;
   const phaseRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const settingsMenuRef = useRef<HTMLDivElement>(null);
 
   const [clientProfile, setClientProfile] = useState<ClientProfile | null>(null);
   const [phases, setPhases] = useState<PhaseWithTasks[]>([]);
@@ -58,11 +61,33 @@ export default function AdminClientDetailPage() {
   const [loading, setLoading] = useState(true);
   const [selectedTask, setSelectedTask] = useState<(ClientTask & { validation?: TaskValidation }) | null>(null);
   const [addTaskPhaseId, setAddTaskPhaseId] = useState<string | null>(null);
+  const [showExport, setShowExport] = useState(false);
+
+  // Recrear proyecto state
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const [recreateStep, setRecreateStep] = useState<null | "warning" | "select">(null);
+  const [recreateStats, setRecreateStats] = useState<{ responses: number; files: number } | null>(null);
+  const [allTemplates, setAllTemplates] = useState<ProjectTemplate[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [templatePreview, setTemplatePreview] = useState<{ phases: number; tasks: number } | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [recreating, setRecreating] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
     if (!authLoading && profile?.role !== "admin") router.replace("/dashboard/onboarding");
   }, [user, profile, authLoading, router]);
+
+  useEffect(() => {
+    if (!showSettingsMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (settingsMenuRef.current && !settingsMenuRef.current.contains(e.target as Node)) {
+        setShowSettingsMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showSettingsMenu]);
 
   const loadClientProfile = useCallback(async () => {
     const { data } = await supabase
@@ -245,6 +270,180 @@ export default function AdminClientDetailPage() {
     await load();
   };
 
+  const handleOpenRecreate = async () => {
+    setShowSettingsMenu(false);
+    // Count client data: responses + files linked to this client's project
+    const { data: project } = await supabase
+      .from("client_projects")
+      .select("id")
+      .eq("client_id", clientId)
+      .maybeSingle();
+
+    if (!project) {
+      setRecreateStats({ responses: 0, files: 0 });
+      setRecreateStep("warning");
+      return;
+    }
+
+    const { data: phasesData } = await supabase
+      .from("client_phases")
+      .select("id")
+      .eq("project_id", project.id);
+
+    const phaseIds = (phasesData ?? []).map((p) => p.id);
+    let taskIds: string[] = [];
+    if (phaseIds.length > 0) {
+      const { data: tasksData } = await supabase
+        .from("client_tasks")
+        .select("id")
+        .in("phase_id", phaseIds);
+      taskIds = (tasksData ?? []).map((t) => t.id);
+    }
+
+    let questionIds: string[] = [];
+    if (taskIds.length > 0) {
+      const { data: questionsData } = await supabase
+        .from("task_questions")
+        .select("id")
+        .in("task_id", taskIds);
+      questionIds = (questionsData ?? []).map((q) => q.id);
+    }
+
+    let responseCount = 0;
+    let fileCount = 0;
+    if (questionIds.length > 0) {
+      const [{ count: rc }, { count: fc }] = await Promise.all([
+        supabase.from("task_responses").select("id", { count: "exact", head: true }).in("question_id", questionIds),
+        supabase.from("task_files").select("id", { count: "exact", head: true }).in("question_id", questionIds),
+      ]);
+      responseCount = rc ?? 0;
+      fileCount = fc ?? 0;
+    }
+
+    setRecreateStats({ responses: responseCount, files: fileCount });
+    setRecreateStep("warning");
+  };
+
+  const handleProceedToTemplateSelect = async () => {
+    const { data } = await supabase
+      .from("project_templates")
+      .select("*")
+      .order("name");
+    setAllTemplates(data ?? []);
+    setSelectedTemplateId(null);
+    setTemplatePreview(null);
+    setRecreateStep("select");
+  };
+
+  const handleSelectTemplatePreview = async (templateId: string) => {
+    setSelectedTemplateId(templateId);
+    setLoadingPreview(true);
+    setTemplatePreview(null);
+
+    const { data: pts } = await supabase
+      .from("phase_templates")
+      .select("id")
+      .eq("template_id", templateId);
+
+    const phaseCount = (pts ?? []).length;
+    let taskCount = 0;
+    if (phaseCount > 0) {
+      const ptIds = (pts ?? []).map((p) => p.id);
+      const { count } = await supabase
+        .from("task_templates")
+        .select("id", { count: "exact", head: true })
+        .in("phase_template_id", ptIds);
+      taskCount = count ?? 0;
+    }
+
+    setTemplatePreview({ phases: phaseCount, tasks: taskCount });
+    setLoadingPreview(false);
+  };
+
+  const handleRecreateConfirm = async () => {
+    if (!selectedTemplateId) return;
+    setRecreating(true);
+
+    // 1. Get current project
+    const { data: project } = await supabase
+      .from("client_projects")
+      .select("id")
+      .eq("client_id", clientId)
+      .maybeSingle();
+
+    if (project) {
+      // 2. Cascade delete: storage → task_files → task_responses → task_questions → task_validations → client_tasks → phase_files → client_phases → client_projects
+      const { data: phasesData } = await supabase
+        .from("client_phases")
+        .select("id")
+        .eq("project_id", project.id);
+
+      const phaseIds = (phasesData ?? []).map((p) => p.id);
+
+      if (phaseIds.length > 0) {
+        const { data: tasksData } = await supabase
+          .from("client_tasks")
+          .select("id")
+          .in("phase_id", phaseIds);
+        const taskIds = (tasksData ?? []).map((t) => t.id);
+
+        if (taskIds.length > 0) {
+          const { data: questionsData } = await supabase
+            .from("task_questions")
+            .select("id")
+            .in("task_id", taskIds);
+          const questionIds = (questionsData ?? []).map((q) => q.id);
+
+          if (questionIds.length > 0) {
+            const { data: filesToDelete } = await supabase
+              .from("task_files")
+              .select("file_path")
+              .in("question_id", questionIds);
+            if (filesToDelete && filesToDelete.length > 0) {
+              await supabase.storage
+                .from("submissions")
+                .remove(filesToDelete.map((f) => f.file_path));
+            }
+            await supabase.from("task_files").delete().in("question_id", questionIds);
+            await supabase.from("task_responses").delete().in("question_id", questionIds);
+            await supabase.from("task_questions").delete().in("task_id", taskIds);
+          }
+
+          await supabase.from("task_validations").delete().in("task_id", taskIds);
+          await supabase.from("client_tasks").delete().in("phase_id", phaseIds);
+        }
+
+        // Delete phase files from storage + db
+        const { data: phaseFilesToDelete } = await supabase
+          .from("phase_files")
+          .select("file_path")
+          .in("phase_id", phaseIds);
+        if (phaseFilesToDelete && phaseFilesToDelete.length > 0) {
+          await supabase.storage
+            .from("submissions")
+            .remove(phaseFilesToDelete.map((f) => f.file_path));
+        }
+        await supabase.from("phase_files").delete().in("phase_id", phaseIds);
+        await supabase.from("client_phases").delete().eq("project_id", project.id);
+      }
+
+      await supabase.from("client_projects").delete().eq("id", project.id);
+      await supabase.from("profiles").update({ project_id: null }).eq("id", clientId);
+    }
+
+    // 3. Create new project from selected template
+    const ownerLabel = (clientProfile?.company_name ?? "CLIENTE").toUpperCase();
+    const companyName = clientProfile?.company_name ?? "Cliente";
+    await createProjectFromTemplate(clientId, selectedTemplateId, ownerLabel, companyName);
+
+    setRecreating(false);
+    setRecreateStep(null);
+    setRecreateStats(null);
+    setSelectedTemplateId(null);
+    setTemplatePreview(null);
+    await load();
+  };
+
   const getPhaseMaxSortOrder = (phaseId: string): number => {
     const phase = phases.find((p) => p.id === phaseId);
     if (!phase || phase.tasks.length === 0) return 0;
@@ -348,9 +547,112 @@ export default function AdminClientDetailPage() {
             </span>
           </>
         )}
-        {loading && (
-          <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent ml-auto" />
-        )}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
+          {loading && (
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+          )}
+          {!loading && hasProject && phases.length > 0 && (
+            <button
+              onClick={() => setShowExport(true)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "6px 14px",
+                borderRadius: "8px",
+                border: "1.5px solid #0F1629",
+                background: "white",
+                cursor: "pointer",
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "#0F1629",
+                transition: "background 0.15s",
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "#F8FAFC")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "white")}
+            >
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                <path d="M7 1v8M4 6l3 3 3-3M2 11h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Exportar
+            </button>
+          )}
+          {/* Settings menu (always visible for admin) */}
+          {!loading && (
+            <div ref={settingsMenuRef} style={{ position: "relative" }}>
+              <button
+                onClick={() => setShowSettingsMenu((v) => !v)}
+                title="Acciones del proyecto"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: "32px",
+                  height: "32px",
+                  borderRadius: "8px",
+                  border: "1.5px solid #E2E8F0",
+                  background: showSettingsMenu ? "#F1F5F9" : "white",
+                  cursor: "pointer",
+                  color: "#64748B",
+                  transition: "background 0.15s, border-color 0.15s",
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "#F8FAFC";
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = "#CBD5E1";
+                }}
+                onMouseLeave={(e) => {
+                  if (!showSettingsMenu) {
+                    (e.currentTarget as HTMLButtonElement).style.background = "white";
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = "#E2E8F0";
+                  }
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <circle cx="7" cy="2.5" r="1.2" fill="currentColor" />
+                  <circle cx="7" cy="7" r="1.2" fill="currentColor" />
+                  <circle cx="7" cy="11.5" r="1.2" fill="currentColor" />
+                </svg>
+              </button>
+              {showSettingsMenu && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 6px)",
+                    right: 0,
+                    zIndex: 200,
+                    background: "white",
+                    borderRadius: "10px",
+                    border: "1px solid #E2E8F0",
+                    boxShadow: "0 4px 16px rgba(0,0,0,0.10)",
+                    minWidth: "220px",
+                    overflow: "hidden",
+                  }}
+                >
+                  <button
+                    onClick={handleOpenRecreate}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "10px 16px",
+                      fontSize: "13px",
+                      fontWeight: 500,
+                      color: "#DC2626",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      transition: "background 0.12s",
+                    }}
+                    onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "#FEF2F2")}
+                    onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "none")}
+                  >
+                    Recrear proyecto con otro template
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Portal header with client company */}
@@ -479,6 +781,7 @@ export default function AdminClientDetailPage() {
           onClose={() => setSelectedTask(null)}
           onSaved={load}
           isAdmin={true}
+          clientId={clientId}
         />
       )}
       {selectedTask?.task_type === "validation" && (
@@ -499,6 +802,259 @@ export default function AdminClientDetailPage() {
           onClose={() => setAddTaskPhaseId(null)}
           onAdd={handleAddTask}
         />
+      )}
+
+      {/* Export modal */}
+      {showExport && (
+        <ExportModal
+          clientId={clientId}
+          companyName={clientProfile?.company_name ?? null}
+          phases={phases}
+          onClose={() => setShowExport(false)}
+        />
+      )}
+
+      {/* Recrear proyecto — Step 1: Warning */}
+      {recreateStep === "warning" && recreateStats && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(15,22,41,0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setRecreateStep(null); }}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: "16px",
+              padding: "32px",
+              width: "100%",
+              maxWidth: "420px",
+              boxShadow: "0 8px 40px rgba(0,0,0,0.18)",
+            }}
+          >
+            <div
+              style={{
+                width: "44px",
+                height: "44px",
+                borderRadius: "50%",
+                background: "#FEF2F2",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                marginBottom: "16px",
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path d="M10 3L18 17H2L10 3Z" stroke="#DC2626" strokeWidth="1.6" strokeLinejoin="round" />
+                <path d="M10 9v4M10 14.5v.5" stroke="#DC2626" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+            </div>
+            <h2 style={{ fontSize: "17px", fontWeight: 700, color: "#0F1629", marginBottom: "8px" }}>
+              Recrear proyecto
+            </h2>
+            <p style={{ fontSize: "13px", color: "#64748B", marginBottom: "16px", lineHeight: 1.6 }}>
+              Esta acción eliminará permanentemente todo el progreso del cliente:
+            </p>
+            <div
+              style={{
+                background: "#FEF2F2",
+                borderRadius: "10px",
+                padding: "12px 16px",
+                marginBottom: "20px",
+                fontSize: "13px",
+                color: "#991B1B",
+                lineHeight: 1.8,
+              }}
+            >
+              <div>Respuestas guardadas: <strong>{recreateStats.responses}</strong></div>
+              <div>Archivos subidos: <strong>{recreateStats.files}</strong></div>
+              <div style={{ marginTop: "6px", color: "#DC2626", fontWeight: 600 }}>
+                Esta acción no se puede deshacer.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              <button
+                onClick={() => setRecreateStep(null)}
+                style={{
+                  padding: "8px 18px",
+                  borderRadius: "8px",
+                  border: "1.5px solid #E2E8F0",
+                  background: "white",
+                  cursor: "pointer",
+                  fontSize: "13px",
+                  fontWeight: 500,
+                  color: "#64748B",
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleProceedToTemplateSelect}
+                style={{
+                  padding: "8px 18px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: "#DC2626",
+                  cursor: "pointer",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  color: "white",
+                }}
+              >
+                Continuar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Recrear proyecto — Step 2: Template selector */}
+      {recreateStep === "select" && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(15,22,41,0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget && !recreating) setRecreateStep(null); }}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: "16px",
+              padding: "32px",
+              width: "100%",
+              maxWidth: "460px",
+              boxShadow: "0 8px 40px rgba(0,0,0,0.18)",
+            }}
+          >
+            <h2 style={{ fontSize: "17px", fontWeight: 700, color: "#0F1629", marginBottom: "6px" }}>
+              Seleccionar template
+            </h2>
+            <p style={{ fontSize: "13px", color: "#64748B", marginBottom: "20px" }}>
+              El proyecto del cliente se recreará desde cero usando el template seleccionado.
+            </p>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "20px", maxHeight: "260px", overflowY: "auto" }}>
+              {allTemplates.map((tpl) => (
+                <button
+                  key={tpl.id}
+                  onClick={() => handleSelectTemplatePreview(tpl.id)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "12px",
+                    padding: "12px 14px",
+                    borderRadius: "10px",
+                    border: selectedTemplateId === tpl.id ? "2px solid #3B82F6" : "1.5px solid #E2E8F0",
+                    background: selectedTemplateId === tpl.id ? "#EFF6FF" : "white",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    transition: "border-color 0.15s, background 0.15s",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: "8px",
+                      height: "8px",
+                      borderRadius: "50%",
+                      flexShrink: 0,
+                      background: selectedTemplateId === tpl.id ? "#3B82F6" : "#CBD5E1",
+                      transition: "background 0.15s",
+                    }}
+                  />
+                  <div>
+                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F1629" }}>{tpl.name}</div>
+                    {tpl.industry && (
+                      <div style={{ fontSize: "11px", color: "#94A3B8", marginTop: "2px" }}>{tpl.industry}</div>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {/* Template preview */}
+            {selectedTemplateId && (
+              <div
+                style={{
+                  background: "#F8FAFC",
+                  borderRadius: "10px",
+                  padding: "12px 16px",
+                  marginBottom: "20px",
+                  fontSize: "13px",
+                  color: "#475569",
+                  minHeight: "44px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "16px",
+                }}
+              >
+                {loadingPreview ? (
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                ) : templatePreview ? (
+                  <>
+                    <span><strong>{templatePreview.phases}</strong> fases</span>
+                    <span style={{ color: "#CBD5E1" }}>·</span>
+                    <span><strong>{templatePreview.tasks}</strong> tareas</span>
+                  </>
+                ) : null}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              <button
+                onClick={() => { if (!recreating) { setRecreateStep("warning"); setSelectedTemplateId(null); setTemplatePreview(null); } }}
+                disabled={recreating}
+                style={{
+                  padding: "8px 18px",
+                  borderRadius: "8px",
+                  border: "1.5px solid #E2E8F0",
+                  background: "white",
+                  cursor: recreating ? "not-allowed" : "pointer",
+                  fontSize: "13px",
+                  fontWeight: 500,
+                  color: "#64748B",
+                  opacity: recreating ? 0.5 : 1,
+                }}
+              >
+                Volver
+              </button>
+              <button
+                onClick={handleRecreateConfirm}
+                disabled={!selectedTemplateId || recreating}
+                style={{
+                  padding: "8px 18px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: selectedTemplateId && !recreating ? "#DC2626" : "#E2E8F0",
+                  cursor: selectedTemplateId && !recreating ? "pointer" : "not-allowed",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  color: selectedTemplateId && !recreating ? "white" : "#94A3B8",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  transition: "background 0.15s",
+                }}
+              >
+                {recreating && (
+                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                )}
+                {recreating ? "Recreando..." : "Recrear proyecto"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </PortalProviders>
   );

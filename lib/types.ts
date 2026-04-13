@@ -145,6 +145,7 @@ export interface ClientTask {
   sort_order: number | null
   description: string | null
   section_label: string | null
+  general_response: string | null
 }
 
 export interface TaskValidation {
