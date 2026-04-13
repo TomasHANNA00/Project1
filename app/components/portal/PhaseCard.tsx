@@ -276,20 +276,44 @@ export default function PhaseCard({
               No hay tareas en esta fase.
             </p>
           ) : (
-            tasks.map((task) => (
-              <TaskItem
-                key={task.id}
-                task={task}
-                onTaskClick={task.task_type !== "hito" ? onTaskClick : undefined}
-                isAdmin={isAdmin}
-                onCheckboxClick={onCheckboxClick}
-                onDueDateChange={onDueDateChange}
-                onOwnerLabelChange={onOwnerLabelChange}
-                onNameChange={onNameChange}
-                onDeleteTask={onDeleteTask}
-                onOwnerTypeChange={onOwnerTypeChange}
-              />
-            ))
+            tasks.map((task, index) => {
+              const prevTask = index > 0 ? tasks[index - 1] : null;
+              const showSectionHeader =
+                task.section_label != null &&
+                (prevTask == null || prevTask.section_label !== task.section_label);
+              return (
+                <div key={task.id}>
+                  {showSectionHeader && index > 0 && (
+                    <div style={{ borderTop: "1px solid #E2E8F0", margin: "0 20px" }} />
+                  )}
+                  {showSectionHeader && (
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        letterSpacing: "0.05em",
+                        textTransform: "uppercase",
+                        color: "#64748B",
+                        padding: index === 0 ? "14px 20px 6px" : "16px 20px 6px",
+                      }}
+                    >
+                      {task.section_label}
+                    </div>
+                  )}
+                  <TaskItem
+                    task={task}
+                    onTaskClick={task.task_type !== "hito" ? onTaskClick : undefined}
+                    isAdmin={isAdmin}
+                    onCheckboxClick={onCheckboxClick}
+                    onDueDateChange={onDueDateChange}
+                    onOwnerLabelChange={onOwnerLabelChange}
+                    onNameChange={onNameChange}
+                    onDeleteTask={onDeleteTask}
+                    onOwnerTypeChange={onOwnerTypeChange}
+                  />
+                </div>
+              );
+            })
           )}
 
           {/* Admin: Add task button */}

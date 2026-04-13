@@ -144,6 +144,7 @@ export interface ClientTask {
   completed_by: string | null
   sort_order: number | null
   description: string | null
+  section_label: string | null
 }
 
 export interface TaskValidation {
@@ -213,6 +214,7 @@ export interface TaskTemplate {
   default_due_offset_days: number | null
   sort_order: number | null
   description: string | null
+  section_label: string | null
 }
 
 export interface QuestionTemplate {

@@ -82,7 +82,7 @@ async function createProjectFromTemplate(
 
   const { data: taskTemplates } = await supabase
     .from("task_templates")
-    .select("id, phase_template_id, name, task_type, owner_type, default_due_offset_days, sort_order, description")
+    .select("id, phase_template_id, name, task_type, owner_type, default_due_offset_days, sort_order, description, section_label")
     .in("phase_template_id", ptIds)
     .order("sort_order");
 
@@ -150,6 +150,7 @@ async function createProjectFromTemplate(
           due_date: dueDate.toISOString().split("T")[0],
           sort_order: tt.sort_order ?? 0,
           description: tt.description,
+          section_label: tt.section_label ?? null,
           status: "pending",
           progress: 0,
         })
