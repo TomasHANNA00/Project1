@@ -76,7 +76,14 @@ export async function POST(req: NextRequest) {
     (process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000") + "/reset-password";
 
   const { data: inviteData, error: inviteErr } =
-    await supabaseAdmin.auth.admin.inviteUserByEmail(email, { redirectTo });
+    await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+      redirectTo,
+      data: {
+        role: invitedRole,
+        full_name: full_name ?? null,
+        company_name: company_name ?? null,
+      },
+    });
   if (inviteErr) {
     return NextResponse.json({ error: inviteErr.message }, { status: 400 });
   }

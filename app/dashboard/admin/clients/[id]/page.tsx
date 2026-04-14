@@ -63,6 +63,11 @@ export default function AdminClientDetailPage() {
   const [addTaskPhaseId, setAddTaskPhaseId] = useState<string | null>(null);
   const [showExport, setShowExport] = useState(false);
 
+  // Delete client state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletingClient, setDeletingClient] = useState(false);
+  const [deleteClientError, setDeleteClientError] = useState<string | null>(null);
+
   // Recrear proyecto state
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [recreateStep, setRecreateStep] = useState<null | "warning" | "select">(null);
@@ -269,6 +274,26 @@ export default function AdminClientDetailPage() {
       .update({ owner_type: ownerType, owner_label: label })
       .eq("id", taskId);
     await load();
+  };
+
+  const handleDeleteClient = async () => {
+    setDeletingClient(true);
+    setDeleteClientError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token ?? "";
+      const res = await fetch("/api/admin/delete-client", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ clientId }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Error al eliminar");
+      router.replace("/dashboard/admin");
+    } catch (err) {
+      setDeleteClientError(err instanceof Error ? err.message : "Error al eliminar");
+      setDeletingClient(false);
+    }
   };
 
   const handleOpenRecreate = async () => {
@@ -655,6 +680,27 @@ export default function AdminClientDetailPage() {
                     onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "none")}
                   >
                     Recrear proyecto con otro template
+                  </button>
+                  <div style={{ height: "1px", background: "#F1F5F9", margin: "0 12px" }} />
+                  <button
+                    onClick={() => { setShowSettingsMenu(false); setShowDeleteConfirm(true); }}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "10px 16px",
+                      fontSize: "13px",
+                      fontWeight: 500,
+                      color: "#DC2626",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      transition: "background 0.12s",
+                    }}
+                    onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "#FEF2F2")}
+                    onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "none")}
+                  >
+                    Eliminar cliente
                   </button>
                 </div>
               )}
@@ -1076,6 +1122,112 @@ export default function AdminClientDetailPage() {
                   <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
                 )}
                 {recreating ? "Recreando..." : "Recrear proyecto"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ── Delete Client Confirmation Modal ─────────────────── */}
+      {showDeleteConfirm && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(15,22,41,0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "16px",
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget && !deletingClient) setShowDeleteConfirm(false); }}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: "16px",
+              padding: "32px",
+              width: "100%",
+              maxWidth: "420px",
+              boxShadow: "0 8px 40px rgba(0,0,0,0.18)",
+            }}
+          >
+            <div
+              style={{
+                width: "44px",
+                height: "44px",
+                borderRadius: "50%",
+                background: "#FEF2F2",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                marginBottom: "16px",
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path d="M9 2h2a1 1 0 0 1 1 1v1H8V3a1 1 0 0 1 1-1ZM5 5h10l-1 12H6L5 5Zm3 2v8m4-8v8" stroke="#DC2626" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <h3 style={{ fontSize: "17px", fontWeight: 700, color: "#0F1629", marginBottom: "8px" }}>
+              Eliminar cliente
+            </h3>
+            <p style={{ fontSize: "14px", color: "#64748B", lineHeight: 1.5, marginBottom: "8px" }}>
+              ¿Estás seguro de que quieres eliminar permanentemente a{" "}
+              <strong style={{ color: "#0F1629" }}>
+                {clientProfile?.company_name ?? clientProfile?.full_name ?? "este cliente"}
+              </strong>
+              ?
+            </p>
+            <p style={{ fontSize: "13px", color: "#EF4444", marginBottom: "24px" }}>
+              Se borrarán todos sus proyectos, tareas, respuestas, archivos y su cuenta de acceso. Esta acción no se puede deshacer.
+            </p>
+            {deleteClientError && (
+              <div style={{ padding: "10px 14px", borderRadius: "8px", background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626", fontSize: "13px", marginBottom: "16px" }}>
+                {deleteClientError}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button
+                onClick={() => { setShowDeleteConfirm(false); setDeleteClientError(null); }}
+                disabled={deletingClient}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  borderRadius: "8px",
+                  border: "1.5px solid #E2E8F0",
+                  background: "white",
+                  cursor: deletingClient ? "not-allowed" : "pointer",
+                  fontSize: "14px",
+                  fontWeight: 500,
+                  color: "#64748B",
+                  opacity: deletingClient ? 0.5 : 1,
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeleteClient}
+                disabled={deletingClient}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: deletingClient ? "#E2E8F0" : "#DC2626",
+                  cursor: deletingClient ? "not-allowed" : "pointer",
+                  fontSize: "14px",
+                  fontWeight: 600,
+                  color: deletingClient ? "#94A3B8" : "white",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                }}
+              >
+                {deletingClient && (
+                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                )}
+                {deletingClient ? "Eliminando..." : "Eliminar permanentemente"}
               </button>
             </div>
           </div>

@@ -58,6 +58,11 @@ export default function AdminClientsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Delete client state
+  const [deleteTarget, setDeleteTarget] = useState<ClientRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   // Invite modal state
   const [showInvite, setShowInvite] = useState(false);
   const [inviteStep, setInviteStep] = useState<1 | 2 | 3>(1);
@@ -286,6 +291,28 @@ export default function AdminClientsPage() {
     loadProjectTemplates();
   };
 
+  const handleDeleteClient = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const token = session?.access_token;
+      const res = await fetch("/api/admin/delete-client", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ clientId: deleteTarget.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Error desconocido");
+      setDeleteTarget(null);
+      await loadClients();
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : "Error al eliminar");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handleStep1Next = (e: React.FormEvent) => {
     e.preventDefault();
     if (inviteForm.role === "admin") {
@@ -401,7 +428,7 @@ export default function AdminClientsPage() {
                 const templateName = client.project_template_name ?? client.template_name;
 
                 return (
-                  <tr key={client.id} className="hover:bg-zinc-50">
+                  <tr key={client.id} className="group hover:bg-zinc-50">
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-3">
                         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-semibold text-blue-600">
@@ -468,12 +495,23 @@ export default function AdminClientsPage() {
                       {formatDate(client.last_activity)}
                     </td>
                     <td className="px-5 py-4 text-right">
-                      <Link
-                        href={`/dashboard/admin/clients/${client.id}`}
-                        className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-                      >
-                        Ver portal →
-                      </Link>
+                      <div className="flex items-center justify-end gap-2">
+                        <Link
+                          href={`/dashboard/admin/clients/${client.id}`}
+                          className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                        >
+                          Ver portal →
+                        </Link>
+                        <button
+                          onClick={() => { setDeleteTarget(client); setDeleteError(null); }}
+                          title="Eliminar cliente"
+                          className="flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200 text-zinc-400 opacity-0 transition-opacity hover:border-red-200 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
+                        >
+                          <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                            <path d="M2 3.5h10M5.5 3.5V2h3v1.5M4 3.5l.7 7.5h4.6l.7-7.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -801,6 +839,62 @@ export default function AdminClientsPage() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Client Confirmation Modal ─────────────────── */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white shadow-xl">
+            <div className="flex items-start gap-4 p-6">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-100">
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                  <path d="M9 6v4M9 13v.5" stroke="#DC2626" strokeWidth="1.8" strokeLinecap="round" />
+                  <path d="M7.5 2.5L1.5 13a1.7 1.7 0 0 0 1.5 2.5h12a1.7 1.7 0 0 0 1.5-2.5L10.5 2.5a1.7 1.7 0 0 0-3 0z" stroke="#DC2626" strokeWidth="1.5" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="text-base font-semibold text-zinc-900">Eliminar cliente</h3>
+                <p className="mt-1 text-sm text-zinc-500">
+                  ¿Estás seguro de que quieres eliminar a{" "}
+                  <strong className="text-zinc-800">
+                    {deleteTarget.full_name ?? deleteTarget.company_name ?? deleteTarget.id}
+                  </strong>
+                  ?
+                </p>
+                <ul className="mt-3 space-y-1 rounded-lg bg-red-50 px-3 py-2.5 text-xs text-red-700">
+                  <li>• Su cuenta de usuario</li>
+                  <li>• Su proyecto y todas sus tareas</li>
+                  <li>• Todas sus respuestas y archivos</li>
+                  <li>• Todo su progreso y datos</li>
+                </ul>
+                <p className="mt-2 text-xs font-semibold text-red-600">
+                  Esta acción NO se puede deshacer.
+                </p>
+                {deleteError && (
+                  <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">
+                    {deleteError}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-3 border-t border-zinc-100 px-6 py-4">
+              <button
+                onClick={() => { setDeleteTarget(null); setDeleteError(null); }}
+                disabled={deleting}
+                className="flex-1 rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeleteClient}
+                disabled={deleting}
+                className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? "Eliminando..." : "Eliminar permanentemente"}
+              </button>
             </div>
           </div>
         </div>
