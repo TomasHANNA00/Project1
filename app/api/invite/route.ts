@@ -42,10 +42,17 @@ export async function POST(req: NextRequest) {
   const callerEmail = (claims.email as string | undefined) ?? "";
   const callerId = (claims.sub as string | undefined) ?? "";
 
-  // Verify admin via email (fast path) or profiles table (fallback)
+  // Verify admin via email (fast path) or profiles table (fallback).
+  // Use the caller's own JWT — avoids a silent failure when SUPABASE_SERVICE_ROLE_KEY
+  // is not available, since RLS already allows a user to SELECT their own profile row.
   let isAdmin = ADMIN_EMAILS.includes(callerEmail);
   if (!isAdmin && callerId) {
-    const { data: p } = await supabaseAdmin
+    const supabaseForCheck = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { global: { headers: { Authorization: `Bearer ${token}` } } }
+    );
+    const { data: p } = await supabaseForCheck
       .from("profiles")
       .select("role")
       .eq("id", callerId)

@@ -44,9 +44,17 @@ export async function POST(req: NextRequest) {
   const callerEmail = (claims.email as string | undefined) ?? "";
   const callerId = (claims.sub as string | undefined) ?? "";
 
+  // Verify admin via email (fast path) or profiles table (fallback).
+  // Use the caller's own JWT so the check works even without SUPABASE_SERVICE_ROLE_KEY,
+  // since RLS allows a user to SELECT their own profile row.
   let isAdmin = ADMIN_EMAILS.includes(callerEmail);
   if (!isAdmin && callerId) {
-    const { data: p } = await supabaseAdmin
+    const supabaseForCheck = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { global: { headers: { Authorization: `Bearer ${token}` } } }
+    );
+    const { data: p } = await supabaseForCheck
       .from("profiles")
       .select("role")
       .eq("id", callerId)
@@ -69,9 +77,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No puedes eliminarte a ti mismo" }, { status: 403 });
   }
 
-  const { data: targetProfile } = await supabaseAdmin
+  // Use caller's JWT to fetch target profile — admin RLS policy allows reading all profiles.
+  const supabaseForTarget = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { global: { headers: { Authorization: `Bearer ${token}` } } }
+  );
+  const { data: targetProfile } = await supabaseForTarget
     .from("profiles")
-    .select("role, full_name, email")
+    .select("role, full_name")
     .eq("id", clientId)
     .single();
 
