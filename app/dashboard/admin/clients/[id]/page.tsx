@@ -68,6 +68,24 @@ export default function AdminClientDetailPage() {
   const [deletingClient, setDeletingClient] = useState(false);
   const [deleteClientError, setDeleteClientError] = useState<string | null>(null);
 
+  // Current project id (set after load — supports member users whose project is looked up via project_members)
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+
+  // Members modal state
+  const [showMembersModal, setShowMembersModal] = useState(false);
+  const [members, setMembers] = useState<Array<{
+    user_id: string;
+    role: string;
+    created_at: string;
+    full_name: string | null;
+    company_name: string | null;
+  }>>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [addMemberEmail, setAddMemberEmail] = useState("");
+  const [addMemberLoading, setAddMemberLoading] = useState(false);
+  const [addMemberError, setAddMemberError] = useState<string | null>(null);
+  const [addMemberSuccess, setAddMemberSuccess] = useState<string | null>(null);
+
   // Recrear proyecto state
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [recreateStep, setRecreateStep] = useState<null | "warning" | "select">(null);
@@ -107,19 +125,27 @@ export default function AdminClientDetailPage() {
   const load = useCallback(async () => {
     setLoading(true);
 
-    const { data: project } = await supabase
-      .from("client_projects")
-      .select("*")
-      .eq("client_id", clientId)
+    // Check project_members first (for member users who don't own the project via client_id)
+    const { data: membership } = await supabase
+      .from("project_members")
+      .select("project_id")
+      .eq("user_id", clientId)
+      .limit(1)
       .maybeSingle();
+
+    const { data: project } = membership?.project_id
+      ? await supabase.from("client_projects").select("*").eq("id", membership.project_id).maybeSingle()
+      : await supabase.from("client_projects").select("*").eq("client_id", clientId).maybeSingle();
 
     if (!project) {
       setHasProject(false);
+      setCurrentProjectId(null);
       setLoading(false);
       return;
     }
 
     setHasProject(true);
+    setCurrentProjectId(project.id);
 
     const { data: phasesData } = await supabase
       .from("client_phases")
@@ -296,14 +322,73 @@ export default function AdminClientDetailPage() {
     }
   };
 
+  const loadMembers = useCallback(async () => {
+    if (!currentProjectId) return;
+    setMembersLoading(true);
+    const { data } = await supabase
+      .from("project_members")
+      .select("user_id, role, created_at, profiles(full_name, company_name)")
+      .eq("project_id", currentProjectId)
+      .order("created_at");
+    setMembers(
+      (data ?? []).map((m: any) => ({
+        user_id: m.user_id,
+        role: m.role,
+        created_at: m.created_at,
+        full_name: (m.profiles as any)?.full_name ?? null,
+        company_name: (m.profiles as any)?.company_name ?? null,
+      }))
+    );
+    setMembersLoading(false);
+  }, [currentProjectId]);
+
+  const handleAddMember = async () => {
+    if (!addMemberEmail.trim() || !currentProjectId) return;
+    setAddMemberLoading(true);
+    setAddMemberError(null);
+    setAddMemberSuccess(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token ?? "";
+      const res = await fetch("/api/admin/lookup-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ email: addMemberEmail.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Usuario no encontrado");
+      const { userId, fullName } = json;
+      const { error } = await supabase
+        .from("project_members")
+        .upsert(
+          { project_id: currentProjectId, user_id: userId, role: "member" },
+          { onConflict: "project_id,user_id" }
+        );
+      if (error) throw new Error(error.message);
+      setAddMemberEmail("");
+      setAddMemberSuccess(`${fullName ?? addMemberEmail.trim()} agregado al proyecto`);
+      await loadMembers();
+    } catch (err) {
+      setAddMemberError(err instanceof Error ? err.message : "Error al agregar miembro");
+    } finally {
+      setAddMemberLoading(false);
+    }
+  };
+
+  const handleRemoveMember = async (userId: string) => {
+    if (!currentProjectId) return;
+    await supabase
+      .from("project_members")
+      .delete()
+      .eq("project_id", currentProjectId)
+      .eq("user_id", userId);
+    await loadMembers();
+  };
+
   const handleOpenRecreate = async () => {
     setShowSettingsMenu(false);
     // Count client data: responses + files linked to this client's project
-    const { data: project } = await supabase
-      .from("client_projects")
-      .select("id")
-      .eq("client_id", clientId)
-      .maybeSingle();
+    const project = currentProjectId ? { id: currentProjectId } : null;
 
     if (!project) {
       setRecreateStats({ responses: 0, files: 0 });
@@ -392,12 +477,8 @@ export default function AdminClientDetailPage() {
     setRecreateError(null);
 
     try {
-      // 1. Get current project
-      const { data: project } = await supabase
-        .from("client_projects")
-        .select("id")
-        .eq("client_id", clientId)
-        .maybeSingle();
+      // 1. Use current project from state
+      const project = currentProjectId ? { id: currentProjectId } : null;
 
       if (project) {
         // 2. Cascade delete: storage → task_files → task_responses → task_questions → task_validations → client_tasks → phase_files → client_phases → client_projects
@@ -608,6 +689,41 @@ export default function AdminClientDetailPage() {
                 <path d="M7 1v8M4 6l3 3 3-3M2 11h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
               Exportar
+            </button>
+          )}
+          {/* Members button */}
+          {!loading && hasProject && (
+            <button
+              onClick={() => {
+                loadMembers();
+                setShowMembersModal(true);
+                setAddMemberEmail("");
+                setAddMemberError(null);
+                setAddMemberSuccess(null);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "6px 14px",
+                borderRadius: "8px",
+                border: "1.5px solid #E2E8F0",
+                background: "white",
+                cursor: "pointer",
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "#64748B",
+                transition: "background 0.15s",
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "#F8FAFC")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "white")}
+            >
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                <circle cx="5" cy="4" r="2" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M1 12c0-2.2 1.8-4 4-4s4 1.8 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M11 5v4M9 7h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              Miembros
             </button>
           )}
           {/* Settings menu — only shown when client has an active project */}
@@ -1229,6 +1345,182 @@ export default function AdminClientDetailPage() {
                 )}
                 {deletingClient ? "Eliminando..." : "Eliminar permanentemente"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Members Modal ─────────────────────────────────────── */}
+      {showMembersModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(15,22,41,0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "16px",
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowMembersModal(false); }}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: "16px",
+              padding: "32px",
+              width: "100%",
+              maxWidth: "480px",
+              boxShadow: "0 8px 40px rgba(0,0,0,0.18)",
+              maxHeight: "80vh",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "20px" }}>
+              <h3 style={{ fontSize: "17px", fontWeight: 700, color: "#0F1629" }}>Miembros del proyecto</h3>
+              <button
+                onClick={() => setShowMembersModal(false)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#94A3B8", fontSize: "20px", lineHeight: 1, padding: "2px 6px" }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Member list */}
+            <div style={{ flex: 1, overflowY: "auto", marginBottom: "20px", minHeight: "60px" }}>
+              {membersLoading ? (
+                <div style={{ display: "flex", justifyContent: "center", padding: "24px" }}>
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                </div>
+              ) : members.length === 0 ? (
+                <p style={{ fontSize: "13px", color: "#94A3B8", textAlign: "center", padding: "24px 0" }}>
+                  No hay miembros registrados.
+                </p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {members.map((m) => (
+                    <div
+                      key={m.user_id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "12px",
+                        padding: "10px 14px",
+                        borderRadius: "10px",
+                        border: "1px solid #E2E8F0",
+                        background: "#FAFAFA",
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F1629" }}>
+                          {m.full_name ?? "Sin nombre"}
+                        </div>
+                        {m.company_name && (
+                          <div style={{ fontSize: "11px", color: "#94A3B8", marginTop: "1px" }}>
+                            {m.company_name}
+                          </div>
+                        )}
+                      </div>
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          fontWeight: 600,
+                          padding: "2px 8px",
+                          borderRadius: "20px",
+                          background: m.role === "owner" ? "#EFF6FF" : "#F1F5F9",
+                          color: m.role === "owner" ? "#2563EB" : "#64748B",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {m.role === "owner" ? "Propietario" : "Miembro"}
+                      </span>
+                      {m.role !== "owner" && (
+                        <button
+                          onClick={() => handleRemoveMember(m.user_id)}
+                          title="Eliminar miembro"
+                          style={{
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            color: "#CBD5E1",
+                            padding: "2px",
+                            display: "flex",
+                            alignItems: "center",
+                            flexShrink: 0,
+                            transition: "color 0.12s",
+                          }}
+                          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#DC2626")}
+                          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#CBD5E1")}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                            <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Add member form */}
+            <div style={{ borderTop: "1px solid #E2E8F0", paddingTop: "16px" }}>
+              <p style={{ fontSize: "12px", fontWeight: 600, color: "#64748B", marginBottom: "8px" }}>
+                Agregar miembro existente
+              </p>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <input
+                  type="email"
+                  placeholder="email@ejemplo.com"
+                  value={addMemberEmail}
+                  onChange={(e) => {
+                    setAddMemberEmail(e.target.value);
+                    setAddMemberError(null);
+                    setAddMemberSuccess(null);
+                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleAddMember(); }}
+                  style={{
+                    flex: 1,
+                    padding: "8px 12px",
+                    borderRadius: "8px",
+                    border: "1.5px solid #E2E8F0",
+                    fontSize: "13px",
+                    color: "#0F1629",
+                    outline: "none",
+                  }}
+                />
+                <button
+                  onClick={handleAddMember}
+                  disabled={addMemberLoading || !addMemberEmail.trim()}
+                  style={{
+                    padding: "8px 16px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: addMemberEmail.trim() && !addMemberLoading ? "#0F1629" : "#E2E8F0",
+                    color: addMemberEmail.trim() && !addMemberLoading ? "white" : "#94A3B8",
+                    cursor: addMemberEmail.trim() && !addMemberLoading ? "pointer" : "not-allowed",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    flexShrink: 0,
+                  }}
+                >
+                  {addMemberLoading && (
+                    <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  )}
+                  Agregar
+                </button>
+              </div>
+              {addMemberError && (
+                <p style={{ fontSize: "12px", color: "#DC2626", marginTop: "6px" }}>{addMemberError}</p>
+              )}
+              {addMemberSuccess && (
+                <p style={{ fontSize: "12px", color: "#059669", marginTop: "6px" }}>{addMemberSuccess}</p>
+              )}
             </div>
           </div>
         </div>

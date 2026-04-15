@@ -226,6 +226,17 @@ export interface QuestionTemplate {
   sort_order: number | null
 }
 
+export interface ProjectMember {
+  id: string
+  project_id: string
+  user_id: string
+  role: 'owner' | 'member'
+  created_at: string
+  // joined via profiles
+  full_name?: string | null
+  company_name?: string | null
+}
+
 export interface PhaseFile {
   id: string
   phase_id: string

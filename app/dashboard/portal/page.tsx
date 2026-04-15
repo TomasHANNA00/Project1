@@ -69,10 +69,26 @@ export default function PortalPage() {
   const load = async () => {
     setLoading(true);
 
+    // Primary: look up via project_members (supports multi-member projects).
+    // Fallback: profile.project_id for backward compat with users not yet in project_members.
+    const { data: membership } = await supabase
+      .from("project_members")
+      .select("project_id")
+      .eq("user_id", user!.id)
+      .limit(1)
+      .maybeSingle();
+
+    const projectId = membership?.project_id ?? profile?.project_id;
+    if (!projectId) {
+      setHasProject(false);
+      setLoading(false);
+      return;
+    }
+
     const { data: project } = await supabase
       .from("client_projects")
       .select("*")
-      .eq("client_id", user!.id)
+      .eq("id", projectId)
       .maybeSingle();
 
     if (!project) {

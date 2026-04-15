@@ -133,5 +133,11 @@ export async function createProjectFromTemplate(
   }
 
   await supabase.from("profiles").update({ project_id: project.id }).eq("id", clientId);
+
+  // Register owner in project_members so the new multi-member system works
+  await supabase
+    .from("project_members")
+    .upsert({ project_id: project.id, user_id: clientId, role: "owner" }, { onConflict: "project_id,user_id" });
+
   return project as ClientProject;
 }
