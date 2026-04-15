@@ -32,7 +32,12 @@ function LoginForm() {
     if (error) {
       setError("Correo o contraseña incorrectos.");
       setLoading(false);
+      return;
     }
+
+    // Redirect immediately — don't wait for AuthContext to settle.
+    // The dashboard page waits for auth loading before routing further.
+    router.replace("/dashboard");
   };
 
   if (authLoading || user) return null;

@@ -68,92 +68,94 @@ export default function PortalPage() {
 
   const load = async () => {
     setLoading(true);
+    try {
+      // Primary: look up via project_members (supports multi-member projects).
+      // Fallback: profile.project_id for backward compat with users not yet in project_members.
+      const { data: membership } = await supabase
+        .from("project_members")
+        .select("project_id")
+        .eq("user_id", user!.id)
+        .limit(1)
+        .maybeSingle();
 
-    // Primary: look up via project_members (supports multi-member projects).
-    // Fallback: profile.project_id for backward compat with users not yet in project_members.
-    const { data: membership } = await supabase
-      .from("project_members")
-      .select("project_id")
-      .eq("user_id", user!.id)
-      .limit(1)
-      .maybeSingle();
+      const projectId = membership?.project_id ?? profile?.project_id;
+      if (!projectId) {
+        setHasProject(false);
+        return;
+      }
 
-    const projectId = membership?.project_id ?? profile?.project_id;
-    if (!projectId) {
-      setHasProject(false);
-      setLoading(false);
-      return;
-    }
-
-    const { data: project } = await supabase
-      .from("client_projects")
-      .select("*")
-      .eq("id", projectId)
-      .maybeSingle();
-
-    if (!project) {
-      setHasProject(false);
-      setLoading(false);
-      return;
-    }
-
-    setHasProject(true);
-
-    const { data: phasesData } = await supabase
-      .from("client_phases")
-      .select("*")
-      .eq("project_id", project.id)
-      .order("phase_number");
-
-    if (!phasesData || phasesData.length === 0) {
-      setPhases([]);
-      setLoading(false);
-      return;
-    }
-
-    const phaseIds = phasesData.map((p) => p.id);
-
-    const { data: tasksData } = await supabase
-      .from("client_tasks")
-      .select("*")
-      .in("phase_id", phaseIds)
-      .order("sort_order");
-
-    const tasks = tasksData ?? [];
-    const taskIds = tasks.map((t) => t.id);
-
-    let validationMap = new Map<string, TaskValidation>();
-    if (taskIds.length > 0) {
-      const { data: validationsData } = await supabase
-        .from("task_validations")
+      const { data: project } = await supabase
+        .from("client_projects")
         .select("*")
-        .in("task_id", taskIds);
-      validationMap = new Map(
-        (validationsData ?? []).map((v) => [v.task_id, v])
-      );
+        .eq("id", projectId)
+        .maybeSingle();
+
+      if (!project) {
+        setHasProject(false);
+        return;
+      }
+
+      setHasProject(true);
+
+      const { data: phasesData } = await supabase
+        .from("client_phases")
+        .select("*")
+        .eq("project_id", project.id)
+        .order("phase_number");
+
+      if (!phasesData || phasesData.length === 0) {
+        setPhases([]);
+        return;
+      }
+
+      const phaseIds = phasesData.map((p) => p.id);
+
+      const { data: tasksData } = await supabase
+        .from("client_tasks")
+        .select("*")
+        .in("phase_id", phaseIds)
+        .order("sort_order");
+
+      const tasks = tasksData ?? [];
+      const taskIds = tasks.map((t) => t.id);
+
+      let validationMap = new Map<string, TaskValidation>();
+      if (taskIds.length > 0) {
+        const { data: validationsData } = await supabase
+          .from("task_validations")
+          .select("*")
+          .in("task_id", taskIds);
+        validationMap = new Map(
+          (validationsData ?? []).map((v) => [v.task_id, v])
+        );
+      }
+
+      const { data: phaseFilesData } = await supabase
+        .from("phase_files")
+        .select("*")
+        .in("phase_id", phaseIds);
+
+      const phaseFilesMap = new Map<string, PhaseFile[]>();
+      for (const f of phaseFilesData ?? []) {
+        if (!phaseFilesMap.has(f.phase_id)) phaseFilesMap.set(f.phase_id, []);
+        phaseFilesMap.get(f.phase_id)!.push(f as PhaseFile);
+      }
+
+      const assembled: PhaseWithTasks[] = phasesData.map((phase) => ({
+        ...phase,
+        files: phaseFilesMap.get(phase.id) ?? [],
+        tasks: tasks
+          .filter((t) => t.phase_id === phase.id)
+          .map((t) => ({ ...t, validation: validationMap.get(t.id) })),
+      }));
+
+      setPhases(assembled);
+    } catch (err) {
+      console.error("[portal] load error:", err);
+      setHasProject(false);
+    } finally {
+      setLoading(false);
     }
-
-    const { data: phaseFilesData } = await supabase
-      .from("phase_files")
-      .select("*")
-      .in("phase_id", phaseIds);
-
-    const phaseFilesMap = new Map<string, PhaseFile[]>();
-    for (const f of phaseFilesData ?? []) {
-      if (!phaseFilesMap.has(f.phase_id)) phaseFilesMap.set(f.phase_id, []);
-      phaseFilesMap.get(f.phase_id)!.push(f as PhaseFile);
-    }
-
-    const assembled: PhaseWithTasks[] = phasesData.map((phase) => ({
-      ...phase,
-      files: phaseFilesMap.get(phase.id) ?? [],
-      tasks: tasks
-        .filter((t) => t.phase_id === phase.id)
-        .map((t) => ({ ...t, validation: validationMap.get(t.id) })),
-    }));
-
-    setPhases(assembled);
-    setLoading(false);
   };
 
   if (authLoading || !user) {

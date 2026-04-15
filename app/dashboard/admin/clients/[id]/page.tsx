@@ -365,6 +365,11 @@ export default function AdminClientDetailPage() {
           { onConflict: "project_id,user_id" }
         );
       if (error) throw new Error(error.message);
+      // Also set profile.project_id so the dashboard router sends them to portal
+      await supabase
+        .from("profiles")
+        .update({ project_id: currentProjectId })
+        .eq("id", userId);
       setAddMemberEmail("");
       setAddMemberSuccess(`${fullName ?? addMemberEmail.trim()} agregado al proyecto`);
       await loadMembers();
