@@ -54,7 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // release the loading gate so the app doesn't hang forever.
     const timeout = setTimeout(() => {
       if (mounted.current) setLoading(false);
-    }, 8000);
+    }, 5000);
 
     // 1. getSession() explicitly reads the stored token and registers it on
     //    the Supabase client, ensuring that every subsequent query (profile
