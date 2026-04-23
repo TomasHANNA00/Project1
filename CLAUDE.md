@@ -2,7 +2,7 @@
 
 # Vambe Client Onboarding Portal — Project State
 
-**Last updated:** 2026-04-10
+**Last updated:** 2026-04-22
 **Stack:** Next.js 16.2.2 · React 19 · TypeScript · Tailwind CSS v4 · Supabase
 **Supabase project:** `bzfspkxbvqjbvmumrozx` (name: "Files", org: Vambe Pro)
 **Supabase URL:** https://bzfspkxbvqjbvmumrozx.supabase.co
@@ -342,8 +342,60 @@ Type badges:
 
 ## Test Data
 
-- **Nissan Iztacalco** — active client project with 16 tasks, 4 phases, 28 questions
+- **Nissan Iztacalco** — active client project, 4 phases, Automotora L template
 - **Client login:** tomas.hanna@ug.uchile.cl
+
+---
+
+## Template structure (April 2026)
+
+There are now **7 L templates**: Automotora L, E-commerce Nativa L, E-commerce No Nativa L, Educación L, Inmobiliaria L, Salud L, Servicios L. All share identical Phase 2–4 blueprints. Applied to Nissan Iztacalco client project simultaneously with the initial restructuring.
+
+**Rename (April 2026):** `E-commerce L` → `E-commerce Nativa L` (industry slug unchanged: `ecommerce`). A new separate template `E-commerce No Nativa L` (industry: `ecommerce-no-nativa`) was created with its own Phase 1 content.
+
+**Phase 1 — Recopilación de Información**
+
+Phase 1 content was fully populated in April 2026 for 4 templates. Structure per template:
+
+| Template | Tasks | Questions | Notes |
+|----------|-------|-----------|-------|
+| Educación L | 8 | 17 | Sections: Meta (2 hito), BASES DE LA EMPRESA, INFORMACIÓN DE LOS PROGRAMAS (file upload), PROCESO DE VENTA, CRM |
+| Servicios L | 8 | 11 | Sections: Meta (2 hito), BASES DE LA EMPRESA, RESOLUCIÓN DE DUDAS Y ESTRATEGIA DE VENTA (FAQ format + Catálogo), CONVERSACIONES REALES (WhatsApp export) |
+| E-commerce Nativa L | 12 | 19 | Sections: Meta (2 hito), INTEGRACIÓN (e-commerce platform access), FLUJO DE VENTA, POSTVENTA |
+| E-commerce No Nativa L | 12 | 18 | Same as Nativa except Task 3 is "Catálogo de productos" (CATÁLOGO section, file upload) instead of "Conectar e-commerce a Vambe" |
+
+All Phase 1 templates start with 2 `hito` / `vambe` tasks (`section_label = 'Meta'`): "Validar portafolio comercial" and "Validar cuenta WhatsApp Business".
+
+**Phase 1 legacy (unchanged — original Phase 2/3/4 restructuring)**
+- Task formerly named `"Preguntas del cliente"` (Automotora L) or `"Conversaciones Reales"` (other 5 L templates) was renamed → `"Respuestas generales"` in all 6 original templates and in Nissan.
+- `"Requisitos técnicos"` (`info_request`, `client`) added as last Phase 1 task in all templates **except** Automotora L (already existed there and in Nissan).
+
+**Phase 2 — Implementación** (8 tasks, in order)
+
+| # | Name | Type | owner_type | section_label |
+|---|------|------|------------|---------------|
+| 1 | Acceso del equipo a la plataforma | `validation` | `client` | — |
+| 2 | Validación del flujo conversacional | `validation` | `client` | — |
+| 3 | Pruebas del flujo | `hito` | `vambe` | — |
+| 4 | Definición de KPIs | `hito` | `vambe` | — |
+| 5 | Implementación de Dashboards | `hito` | `vambe` | — |
+| 6 | Asignación y notificación de ejecutivos | `hito` | `vambe` | — |
+| 7 | Implementación de CRM | `hito` | `vambe` | — |
+| 8 | Conexión con sistemas | `hito` | `vambe` | `Conexión con sistemas` |
+
+Task 8's `section_label = 'Conexión con sistemas'` is intentional. Per-client integrations are added as additional `hito` tasks with the **same** `section_label`, causing the UI to group them under a visual "Conexión con sistemas" header. Only the anchor task is in the template; extra per-client tasks are inserted into `client_tasks` at implementation time.
+
+**Phase 3 — Lanzamiento** (4 tasks, all `hito`, `vambe`)
+
+Capacitación de Owner · Capacitación del equipo · Lanzamiento volumen reducido · Lanzamiento volumen total
+
+**Phase 4 — Monitoreo** (3 tasks)
+
+| # | Name | Type | owner_type |
+|---|------|------|------------|
+| 1 | Monitoreo de lanzamiento | `hito` | `vambe` |
+| 2 | Definición y Revisión de KPIs de éxito | `validation` | `vambe` |
+| 3 | Sesión de análisis y resultados | `hito` | `vambe` |
 
 ---
 
@@ -432,3 +484,16 @@ Type badges:
 9. **Copy-on-create model** → Editing `project_templates` / `phase_templates` / `task_templates` / `question_templates` does NOT affect existing `client_projects`. Each client gets a snapshot at invite/project-creation time.
 
 10. **`project_id` on Profile** → Clients with `project_id` get the Portal de Status. Clients without get the legacy onboarding. The `/dashboard/page.tsx` router checks this field. Make sure `project_id` is populated in profiles when creating a client project.
+
+11. **Back office user creation: always verify role after creation** → When creating users via `auth.admin.createUser()`, the `handle_new_user` trigger sometimes does NOT pick up `role` from `raw_user_meta_data`. After creating any user, query `profiles` to confirm the role. If wrong, fix directly:
+```sql
+UPDATE profiles SET role = 'admin' WHERE id = '<user_id>';
+```
+
+12. **`project_members` table (added April 2026)** → Multiple users can share the same project. When creating a client via back office scripts, also INSERT into `project_members`:
+```sql
+INSERT INTO project_members (project_id, user_id, role) VALUES ('<project_id>', '<user_id>', 'member');
+```
+The invite flow handles this automatically; back office scripts must do it manually.
+
+13. **Environment variables: two places, not synced** → `.env.local` = local dev; Vercel dashboard = production. They are independent — changing one does not update the other. `NEXT_PUBLIC_*` vars are baked at build time; changing them in Vercel requires a redeploy. Note: Supabase keys changed format in April 2026 from long JWTs (`eyJ...`) to short keys (`sb_publishable_...` / `sb_secret_...`).
