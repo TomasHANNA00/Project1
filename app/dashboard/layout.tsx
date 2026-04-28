@@ -106,7 +106,8 @@ export default function DashboardLayout({
   const navItems = isAdmin
     ? [
         { label: "Clientes", href: "/dashboard/admin", icon: <IconUsers /> },
-        { label: "Pipeline", href: "/dashboard/admin/pipeline", icon: <IconBolt /> },
+        // TODO: re-enable when pipeline is ready for admin use (hidden 2026-04-27)
+        // { label: "Pipeline", href: "/dashboard/admin/pipeline", icon: <IconBolt /> },
         { label: "Plantillas", href: "/dashboard/admin/templates", icon: <IconGrid /> },
         { label: "Mi Perfil", href: "/dashboard/profile", icon: <IconUser /> },
       ]
