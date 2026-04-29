@@ -46,3 +46,62 @@ body {
   from { opacity: 1; }
   to   { opacity: 0; }
 }
+
+/* === Portal Cliente v2 (Variant B) === */
+:root {
+  /* Brand */
+  --portal-blue: #2563EB;
+  --portal-blue-deep: #1E40AF;
+  --portal-blue-light: #BFDBFE;
+  --portal-blue-lighter: #DBEAFE;
+  --portal-blue-lightest: #EFF6FF;
+
+  /* Vambe accent */
+  --portal-violet: #6D28D9;
+  --portal-violet-bg: #EDE9FE;
+
+  /* Neutrals */
+  --portal-bg-page: #F5F8FF;
+  --portal-fg-1: #0F172A;
+  --portal-fg-2: #1F2937;
+  --portal-fg-3: #374151;
+  --portal-fg-4: #4B5563;
+  --portal-fg-5: #6B7280;
+  --portal-line-1: #E5E7EB;
+  --portal-line-2: #F1F5F9;
+  --portal-line-3: #F3F4F6;
+
+  /* Status */
+  --portal-green: #10B981;
+  --portal-amber-bg: #FFFBEB;
+  --portal-amber-border: #FDE68A;
+  --portal-amber-text: #B45309;
+  --portal-red: #EF4444;
+}
+
+@keyframes pandaIdle {
+  0%, 100% { transform: translateY(0) rotate(-1deg); }
+  50%      { transform: translateY(-3px) rotate(1deg); }
+}
+.panda-idle {
+  animation: pandaIdle 3.6s ease-in-out infinite;
+  transform-origin: center bottom;
+}
+.panda-track-position {
+  transition: top .9s cubic-bezier(.4, 0, .2, 1);
+}
+
+/* Portal v2 layout */
+.portal-layout {
+  display: grid;
+  grid-template-columns: 220px 140px 1fr;
+  gap: 24px;
+  align-items: start;
+  margin-top: 24px;
+}
+@media (max-width: 899px) {
+  .portal-layout {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}

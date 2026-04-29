@@ -497,3 +497,49 @@ INSERT INTO project_members (project_id, user_id, role) VALUES ('<project_id>', 
 The invite flow handles this automatically; back office scripts must do it manually.
 
 13. **Environment variables: two places, not synced** → `.env.local` = local dev; Vercel dashboard = production. They are independent — changing one does not update the other. `NEXT_PUBLIC_*` vars are baked at build time; changing them in Vercel requires a redeploy. Note: Supabase keys changed format in April 2026 from long JWTs (`eyJ...`) to short keys (`sb_publishable_...` / `sb_secret_...`).
+
+---
+
+## Portal del cliente — estructura visual (Variant B, abr 2026)
+
+`/dashboard/portal` fue rediseñado con un layout de 3 columnas (CSS Grid: `220px 70px 1fr`) que colapsa a `1fr` en mobile (< 900px).
+
+### Componentes nuevos (`app/components/portal/`)
+
+| Archivo | Rol |
+|---------|-----|
+| `PortalHero.tsx` | Hero section encima del grid — título de bienvenida y botón de contacto |
+| `PhaseRail.tsx` | Col 1 (220px). Lista vertical de fases con esferas numeradas. Active = border azul wrapper. Done = esfera azul sólida + checkmark. Mobile: scroll horizontal. Reporta `onAnchorsChange(anchors: number[])` — posición center-Y de cada esfera relativa al contenedor, para sincronizar con PandaTrack. |
+| `PandaTrack.tsx` | Col 2 (70px, solo desktop). Línea vertical punteada + dots por fase + panda PNG posicionado en `phaseAnchors[firstNonComplete] - 32`. Pose `traveler` normal, `wave` cuando todo está al 100%. |
+| `PhaseDetail.tsx` | Col 3. Tarjeta de encabezado de fase (eyebrow FASE N DE M, badge numérico, barra de progreso) + bloque Vambe (dot violeta) + bloque cliente (dot azul) + slot PhaseFiles + CTA. |
+| `TaskRow.tsx` | Fila de tarea con 5 estados visuales: `vambe_pending` (ámbar), `vambe_done` (blanco, tachado), `client_pending` (ámbar + CTA), `client_in_review` (azul claro + badge "EN REVISIÓN"), `client_done` (blanco, tachado). |
+| `Panda.tsx` | Wrapper `<Image>` para `panda-traveler.png` / `panda-wave.png` con animación CSS `pandaIdle` (bob vertical 6px, 3s ease-in-out infinite). |
+
+### Archivos de estado
+
+| Archivo | Contenido |
+|---------|-----------|
+| `lib/portalTaskStatus.ts` | `derivePortalTaskState(task)` → `PortalTaskState` (`vambe_pending` \| `vambe_done` \| `client_pending` \| `client_in_review` \| `client_done`). `isClientActionable(task)` → boolean. |
+
+### Assets
+
+- `public/portal/panda-traveler.png` — panda caminando (340×502 px naturales)
+- `public/portal/panda-wave.png` — panda saludando (272×388 px naturales)
+
+### CSS (en `app/globals.css`)
+
+- Variables `--portal-*` — todos los tokens de color del portal
+- `@keyframes pandaIdle` + `.panda-idle` — animación de bob vertical
+- `.panda-track-position` — `transition: top 0.6s cubic-bezier(0.34,1.56,0.64,1)` para movimiento suave
+- `.portal-layout` — `display: grid; grid-template-columns: 220px 70px 1fr; gap: 32px; padding-top: 32px; padding-bottom: 48px;`
+- `@media (max-width: 899px)` — `.portal-layout { grid-template-columns: 1fr; }`
+
+### Lógica de CTA en `page.tsx`
+
+1. Busca la primera tarea `client` + no `hito` + no `completed` en la fase activa → label "Llena la siguiente: {name}"
+2. Si no hay → ofrece "Ver Fase N+1: {name}" y cambia `activePhaseId`
+3. `activePhaseId` por defecto = primera fase con `progress < 100`, o la última si todas están completas
+
+### Componentes que NO se tocaron (siguen igual)
+
+`InfoRequestPanel`, `ValidationPanel`, `PhaseFiles`, `Toast`, `PortalProviders` — solo se eliminaron `PhaseSidebar` y `PhaseCard` del árbol de render (los archivos existen pero ya no se importan en `page.tsx`).

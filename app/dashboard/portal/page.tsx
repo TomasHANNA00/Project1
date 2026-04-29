@@ -6,15 +6,20 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/app/contexts/AuthContext";
 import type { ClientPhase, ClientTask, PhaseFile, TaskValidation } from "@/lib/types";
 import PortalHeader from "@/app/components/portal/PortalHeader";
-import PhaseSidebar from "@/app/components/portal/PhaseSidebar";
-import PhaseCard from "@/app/components/portal/PhaseCard";
 import InfoRequestPanel from "@/app/components/portal/InfoRequestPanel";
 import ValidationPanel from "@/app/components/portal/ValidationPanel";
+import PhaseFiles from "@/app/components/portal/PhaseFiles";
+import PortalHero from "@/app/components/portal/PortalHero";
+import PhaseRail from "@/app/components/portal/PhaseRail";
+import PandaTrack from "@/app/components/portal/PandaTrack";
+import PhaseDetail from "@/app/components/portal/PhaseDetail";
 
 interface PhaseWithTasks extends ClientPhase {
   tasks: (ClientTask & { validation?: TaskValidation })[];
   files: PhaseFile[];
 }
+
+// ── Progress helpers (unchanged from v1) ─────────────────────────
 
 function calcPhaseProgress(tasks: ClientTask[]): number {
   if (tasks.length === 0) return 0;
@@ -37,25 +42,25 @@ function calcTotalProgress(phases: PhaseWithTasks[]): number {
   return sum / allTasks.length;
 }
 
-const STATUS_LEGEND = [
-  { color: "#94A3B8", label: "Pendiente", pulse: false },
-  { color: "#3B82F6", label: "En progreso", pulse: true },
-  { color: "#F59E0B", label: "Requiere info", pulse: false },
-  { color: "#4F46E5", label: "En validación", pulse: false },
-  { color: "#059669", label: "Completado", pulse: false },
-];
+// ─────────────────────────────────────────────────────────────────
 
 export default function PortalPage() {
   const { user, profile, loading: authLoading } = useAuth();
   const router = useRouter();
-  const phaseRefs = useRef<Map<string, HTMLElement>>(new Map());
 
   const [phases, setPhases] = useState<PhaseWithTasks[]>([]);
+  const [projectCreatedAt, setProjectCreatedAt] = useState<string | null>(null);
   const [hasProject, setHasProject] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activePhaseId, setActivePhaseId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<
     (ClientTask & { validation?: TaskValidation }) | null
   >(null);
+
+  // PhaseRail → PandaTrack anchor positions
+  const [phaseAnchors, setPhaseAnchors] = useState<number[]>([]);
+  const railContainerRef = useRef<HTMLDivElement>(null);
+  const [railHeight, setRailHeight] = useState(0);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
@@ -66,11 +71,11 @@ export default function PortalPage() {
     if (!authLoading && user && profile?.role !== "admin") load();
   }, [authLoading, user, profile]);
 
+  // ── Data fetch (identical to v1) ────────────────────────────────
+
   const load = async () => {
     setLoading(true);
     try {
-      // Primary: look up via project_members (supports multi-member projects).
-      // Fallback: profile.project_id for backward compat with users not yet in project_members.
       const { data: membership } = await supabase
         .from("project_members")
         .select("project_id")
@@ -96,6 +101,7 @@ export default function PortalPage() {
       }
 
       setHasProject(true);
+      setProjectCreatedAt(project.created_at ?? null);
 
       const { data: phasesData } = await supabase
         .from("client_phases")
@@ -150,6 +156,9 @@ export default function PortalPage() {
       }));
 
       setPhases(assembled);
+      // Default active phase: first non-completed, or last
+      const firstPending = assembled.find((p) => calcPhaseProgress(p.tasks) < 100);
+      setActivePhaseId((firstPending ?? assembled[assembled.length - 1])?.id ?? null);
     } catch (err) {
       console.error("[portal] load error:", err);
       setHasProject(false);
@@ -157,6 +166,79 @@ export default function PortalPage() {
       setLoading(false);
     }
   };
+
+  // ── Layout helpers ───────────────────────────────────────────────
+
+  const handleAnchorsChange = (anchors: number[]) => {
+    setPhaseAnchors(anchors);
+    if (railContainerRef.current) {
+      setRailHeight(railContainerRef.current.offsetHeight);
+    }
+  };
+
+  const handleTaskClick = (task: ClientTask & { validation?: TaskValidation }) => {
+    setSelectedTask(task);
+  };
+
+  // ── Derived values ───────────────────────────────────────────────
+
+  const totalProgress = calcTotalProgress(phases);
+  const activePhase = phases.find((p) => p.id === activePhaseId) ?? null;
+
+  const railPhases = phases.map((p) => ({
+    id: p.id,
+    phase_number: p.phase_number,
+    name: p.name,
+    progress: calcPhaseProgress(p.tasks),
+  }));
+
+  const trackPhases = phases.map((p) => ({
+    id: p.id,
+    progress: calcPhaseProgress(p.tasks),
+  }));
+
+  // CTA: next actionable client task in active phase, or "Ver Fase N+1"
+  let continueLabel: string | null = null;
+  let onContinueClick: (() => void) | null = null;
+
+  if (activePhase) {
+    const nextClientTask = activePhase.tasks
+      .filter(
+        (t) =>
+          t.owner_type === "client" &&
+          t.task_type !== "hito" &&
+          t.status !== "completed"
+      )
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))[0];
+
+    if (nextClientTask) {
+      continueLabel = `Llena la siguiente: ${nextClientTask.name}`;
+      onContinueClick = () => handleTaskClick(nextClientTask);
+    } else {
+      // All client tasks in phase done — offer to go to next phase
+      const currentIdx = phases.findIndex((p) => p.id === activePhaseId);
+      const nextPhase = phases[currentIdx + 1] ?? null;
+      if (nextPhase) {
+        continueLabel = `Ver Fase ${nextPhase.phase_number}: ${nextPhase.name}`;
+        onContinueClick = () => setActivePhaseId(nextPhase.id);
+      }
+    }
+  }
+
+  // Build phase detail props
+  const activePhaseProgress = activePhase ? calcPhaseProgress(activePhase.tasks) : 0;
+  const completedTaskCount = activePhase?.tasks.filter((t) => t.status === "completed").length ?? 0;
+  const totalTaskCount = activePhase?.tasks.length ?? 0;
+
+  // lastUpdated: most recent completed_at among active phase tasks
+  const lastUpdated =
+    activePhase?.tasks
+      .map((t) => t.completed_at)
+      .filter(Boolean)
+      .sort()
+      .reverse()[0] ?? null;
+
+  // ── Loading / no-project states ──────────────────────────────────
 
   if (authLoading || !user) {
     return (
@@ -168,31 +250,14 @@ export default function PortalPage() {
           justifyContent: "center",
           height: "100vh",
           gap: "12px",
-          background: "#F5F7FB",
+          background: "var(--portal-bg-page)",
         }}
       >
         <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-        <p style={{ fontSize: "13px", color: "#94A3B8" }}>Cargando...</p>
+        <p style={{ fontSize: "13px", color: "var(--portal-fg-5)" }}>Cargando...</p>
       </div>
     );
   }
-
-  const totalProgress = calcTotalProgress(phases);
-
-  const handlePhaseClick = (phaseId: string) => {
-    const el = phaseRefs.current.get(phaseId);
-    if (el) {
-      const top = el.getBoundingClientRect().top + window.scrollY - 80;
-      window.scrollTo({ top, behavior: "smooth" });
-    }
-  };
-
-  const sidebarPhases = phases.map((p) => ({
-    id: p.id,
-    phase_number: p.phase_number,
-    name: p.name,
-    progress: calcPhaseProgress(p.tasks),
-  }));
 
   return (
     <>
@@ -201,149 +266,120 @@ export default function PortalPage() {
         totalProgress={totalProgress}
       />
 
-      <div style={{ display: "flex" }}>
-        {/* Fixed sidebar — only rendered when there's data */}
-        {!loading && hasProject && phases.length > 0 && (
-          <PhaseSidebar phases={sidebarPhases} onPhaseClick={handlePhaseClick} />
+      <main
+        style={{
+          maxWidth: 1280,
+          margin: "0 auto",
+          padding: "0 32px",
+          background: "var(--portal-bg-page)",
+          minHeight: "calc(100vh - 68px)",
+        }}
+      >
+        <PortalHero />
+
+        {loading ? (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              paddingTop: "80px",
+              gap: "12px",
+            }}
+          >
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+            <p style={{ fontSize: "13px", color: "var(--portal-fg-5)" }}>
+              Cargando proyecto...
+            </p>
+          </div>
+        ) : !hasProject ? (
+          <div
+            style={{
+              borderRadius: "16px",
+              border: "1px solid var(--portal-line-1)",
+              background: "white",
+              padding: "48px 32px",
+              textAlign: "center",
+            }}
+          >
+            <p style={{ fontSize: "32px" }}>🚀</p>
+            <p style={{ marginTop: "12px", fontSize: "15px", fontWeight: 600, color: "var(--portal-fg-1)" }}>
+              Tu proyecto aún no ha sido configurado.
+            </p>
+            <p style={{ marginTop: "4px", fontSize: "13px", color: "var(--portal-fg-5)" }}>
+              Contacta a tu administrador.
+            </p>
+          </div>
+        ) : phases.length === 0 ? (
+          <div
+            style={{
+              borderRadius: "16px",
+              border: "1px solid var(--portal-line-1)",
+              background: "white",
+              padding: "48px 32px",
+              textAlign: "center",
+            }}
+          >
+            <p style={{ fontSize: "13px", color: "var(--portal-fg-5)" }}>
+              No hay fases configuradas en tu proyecto.
+            </p>
+          </div>
+        ) : (
+          <div className="portal-layout">
+            {/* Col 1: Phase Rail */}
+            <div ref={railContainerRef}>
+              <PhaseRail
+                phases={railPhases}
+                activePhaseId={activePhaseId ?? ""}
+                onPhaseClick={setActivePhaseId}
+                onAnchorsChange={handleAnchorsChange}
+              />
+            </div>
+
+            {/* Col 2: Panda Track — hidden on mobile via grid collapse */}
+            <div className="hidden min-[900px]:block">
+              <PandaTrack
+                phases={trackPhases}
+                phaseAnchors={phaseAnchors}
+                containerHeight={railHeight}
+              />
+            </div>
+
+            {/* Col 3: Phase Detail */}
+            {activePhase ? (
+              <PhaseDetail
+                phase={{
+                  id: activePhase.id,
+                  phase_number: activePhase.phase_number,
+                  name: activePhase.name,
+                  progress: activePhaseProgress,
+                  totalPhases: phases.length,
+                  completedTaskCount,
+                  totalTaskCount,
+                  lastUpdated,
+                }}
+                company={profile?.company_name ?? null}
+                projectCreatedAt={projectCreatedAt}
+                vambeTasks={activePhase.tasks.filter((t) => t.owner_type === "vambe")}
+                clientTasks={activePhase.tasks.filter((t) => t.owner_type === "client")}
+                onTaskClick={handleTaskClick}
+                onPhaseFilesRender={() => (
+                  <PhaseFiles
+                    phaseId={activePhase.id}
+                    clientId={user.id}
+                    initialFiles={activePhase.files}
+                  />
+                )}
+                onContinueClick={onContinueClick}
+                continueLabel={continueLabel}
+              />
+            ) : null}
+          </div>
         )}
+      </main>
 
-        {/* Main content */}
-        <main
-          className="flex-1 min-[900px]:ml-[180px]"
-          style={{ padding: "24px 32px" }}
-        >
-          {loading ? (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                paddingTop: "80px",
-                gap: "12px",
-              }}
-            >
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-              <p style={{ fontSize: "13px", color: "#94A3B8" }}>
-                Cargando proyecto...
-              </p>
-            </div>
-          ) : !hasProject ? (
-            <div
-              style={{
-                borderRadius: "16px",
-                border: "1px solid #E2E8F0",
-                background: "white",
-                padding: "48px 32px",
-                textAlign: "center",
-              }}
-            >
-              <p style={{ fontSize: "32px" }}>🚀</p>
-              <p
-                style={{
-                  marginTop: "12px",
-                  fontSize: "15px",
-                  fontWeight: 600,
-                  color: "#0F1629",
-                }}
-              >
-                Tu proyecto aún no ha sido configurado.
-              </p>
-              <p
-                style={{
-                  marginTop: "4px",
-                  fontSize: "13px",
-                  color: "#94A3B8",
-                }}
-              >
-                Contacta a tu administrador.
-              </p>
-            </div>
-          ) : phases.length === 0 ? (
-            <div
-              style={{
-                borderRadius: "16px",
-                border: "1px solid #E2E8F0",
-                background: "white",
-                padding: "48px 32px",
-                textAlign: "center",
-              }}
-            >
-              <p style={{ fontSize: "13px", color: "#94A3B8" }}>
-                No hay fases configuradas en tu proyecto.
-              </p>
-            </div>
-          ) : (
-            <>
-              {/* Status legend */}
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: "16px",
-                  marginBottom: "20px",
-                }}
-              >
-                {STATUS_LEGEND.map(({ color, label, pulse }) => (
-                  <div
-                    key={label}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                    }}
-                  >
-                    <div
-                      className={pulse ? "animate-pulse" : ""}
-                      style={{
-                        width: "8px",
-                        height: "8px",
-                        borderRadius: "50%",
-                        background: color,
-                        flexShrink: 0,
-                      }}
-                    />
-                    <span
-                      style={{ fontSize: "12px", color: "#94A3B8" }}
-                    >
-                      {label}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              {/* Phase cards */}
-              {phases.map((phase, i) => {
-                const phaseProgress = calcPhaseProgress(phase.tasks);
-                return (
-                  <div
-                    key={phase.id}
-                    ref={(el) => {
-                      if (el) phaseRefs.current.set(phase.id, el);
-                    }}
-                    style={{ scrollMarginTop: "80px" }}
-                  >
-                    <PhaseCard
-                      phase={phase}
-                      tasks={phase.tasks}
-                      defaultOpen={i === 0}
-                      progress={phaseProgress}
-                      onTaskClick={(task) =>
-                        setSelectedTask(
-                          task as ClientTask & { validation?: TaskValidation }
-                        )
-                      }
-                      phaseFiles={phase.files}
-                      clientId={user!.id}
-                    />
-                  </div>
-                );
-              })}
-            </>
-          )}
-        </main>
-      </div>
-
+      {/* Panels — unchanged from v1 */}
       {selectedTask?.task_type === "info_request" && (
         <InfoRequestPanel
           task={selectedTask}
