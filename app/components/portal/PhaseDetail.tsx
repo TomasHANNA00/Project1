@@ -19,6 +19,7 @@ interface PhaseDetailProps {
   };
   company: string | null;
   projectCreatedAt: string | null;
+  isAdmin?: boolean;
   vambeTasks: ClientTaskWithValidation[];
   clientTasks: ClientTaskWithValidation[];
   onTaskClick: (task: ClientTaskWithValidation) => void;
@@ -51,6 +52,7 @@ export default function PhaseDetail({
   phase,
   company,
   projectCreatedAt,
+  isAdmin = false,
   vambeTasks,
   clientTasks,
   onTaskClick,
@@ -170,6 +172,7 @@ export default function PhaseDetail({
                 key={task.id}
                 task={task}
                 mode="vambe"
+                onClick={isAdmin ? () => onTaskClick(task) : undefined}
                 effectiveDueDate={effectiveDueDate(task, projectCreatedAt)}
               />
             ))}
@@ -194,7 +197,7 @@ export default function PhaseDetail({
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
             {clientTasks.map((task) => {
-              const actionable = isClientActionable(task);
+              const actionable = isAdmin || isClientActionable(task);
               return (
                 <TaskRow
                   key={task.id}

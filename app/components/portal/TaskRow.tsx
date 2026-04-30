@@ -81,7 +81,7 @@ export default function TaskRow({ task, onClick, fileCount, effectiveDueDate }: 
 
   if (state === "vambe_pending") {
     return (
-      <div style={rowStyle}>
+      <div style={rowStyle} onClick={onClick}>
         <CheckboxEmpty />
         <span style={{ flex: 1, fontSize: "14px", fontWeight: 500, color: "var(--portal-fg-2)" }}>
           {task.name}
@@ -95,7 +95,7 @@ export default function TaskRow({ task, onClick, fileCount, effectiveDueDate }: 
 
   if (state === "vambe_done") {
     return (
-      <div style={rowStyle}>
+      <div style={rowStyle} onClick={onClick}>
         <CheckboxDone />
         <span style={{ flex: 1, fontSize: "14px", fontWeight: 500, color: "var(--portal-fg-5)", textDecoration: "line-through" }}>
           {task.name}

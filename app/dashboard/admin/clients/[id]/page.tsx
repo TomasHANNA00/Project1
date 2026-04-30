@@ -9,8 +9,10 @@ import type { ClientPhase, ClientTask, PhaseFile, ProjectTemplate, TaskValidatio
 import { createProjectFromTemplate } from "@/lib/createProject";
 import PortalProviders from "@/app/components/portal/PortalProviders";
 import PortalHeader from "@/app/components/portal/PortalHeader";
-import PhaseSidebar from "@/app/components/portal/PhaseSidebar";
-import PhaseCard from "@/app/components/portal/PhaseCard";
+import PhaseRail from "@/app/components/portal/PhaseRail";
+import PandaTrack from "@/app/components/portal/PandaTrack";
+import PhaseDetail from "@/app/components/portal/PhaseDetail";
+import PhaseFiles from "@/app/components/portal/PhaseFiles";
 import InfoRequestPanel from "@/app/components/portal/InfoRequestPanel";
 import ValidationPanel from "@/app/components/portal/ValidationPanel";
 import AddTaskModal, { type AddTaskData } from "@/app/components/portal/AddTaskModal";
@@ -54,6 +56,11 @@ export default function AdminClientDetailPage() {
   const clientId = params.id;
   const phaseRefs = useRef<Map<string, HTMLElement>>(new Map());
   const settingsMenuRef = useRef<HTMLDivElement>(null);
+  const railContainerRef = useRef<HTMLDivElement>(null);
+
+  const [activePhaseId, setActivePhaseId] = useState<string | null>(null);
+  const [phaseAnchors, setPhaseAnchors] = useState<number[]>([]);
+  const [railHeight, setRailHeight] = useState(0);
 
   const [clientProfile, setClientProfile] = useState<ClientProfile | null>(null);
   const [phases, setPhases] = useState<PhaseWithTasks[]>([]);
@@ -201,6 +208,8 @@ export default function AdminClientDetailPage() {
     }));
 
     setPhases(assembled);
+    const firstPending = assembled.find((p) => calcPhaseProgress(p.tasks) < 100);
+    setActivePhaseId((firstPending ?? assembled[assembled.length - 1])?.id ?? null);
     setLoading(false);
   }, [clientId]);
 
@@ -616,15 +625,40 @@ export default function AdminClientDetailPage() {
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  const handleAnchorsChange = (anchors: number[]) => {
+    setPhaseAnchors(anchors);
+    if (railContainerRef.current) setRailHeight(railContainerRef.current.offsetHeight);
+  };
+
+  const handleAdminTaskClick = (task: ClientTask & { validation?: TaskValidation }) => {
+    if (task.task_type === "hito") {
+      handleCheckboxClick(task);
+    } else {
+      setSelectedTask(task);
+    }
+  };
+
   if (authLoading || !user) return null;
 
   const totalProgress = calcTotalProgress(phases);
-  const sidebarPhases = phases.map((p) => ({
+  const activePhase = phases.find((p) => p.id === activePhaseId) ?? null;
+
+  const railPhases = phases.map((p) => ({
     id: p.id,
     phase_number: p.phase_number,
     name: p.name,
     progress: calcPhaseProgress(p.tasks),
   }));
+
+  const trackPhases = phases.map((p) => ({
+    id: p.id,
+    progress: calcPhaseProgress(p.tasks),
+  }));
+
+  const activePhaseProgress = activePhase ? calcPhaseProgress(activePhase.tasks) : 0;
+  const completedTaskCount = activePhase?.tasks.filter((t) => t.status === "completed").length ?? 0;
+  const totalTaskCount = activePhase?.tasks.length ?? 0;
+  const lastUpdated = activePhase?.tasks.map((t) => t.completed_at).filter(Boolean).sort().reverse()[0] ?? null;
 
   return (
     <PortalProviders>
@@ -669,6 +703,32 @@ export default function AdminClientDetailPage() {
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
           {loading && (
             <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+          )}
+          {!loading && hasProject && activePhaseId && (
+            <button
+              onClick={() => setAddTaskPhaseId(activePhaseId)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "5px",
+                padding: "6px 14px",
+                borderRadius: "8px",
+                border: "1.5px solid #E2E8F0",
+                background: "white",
+                cursor: "pointer",
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "#4F46E5",
+                transition: "background 0.15s",
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "#F8FAFC")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "white")}
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+              Agregar tarea
+            </button>
           )}
           {!loading && hasProject && phases.length > 0 && (
             <button
@@ -836,118 +896,102 @@ export default function AdminClientDetailPage() {
         totalProgress={totalProgress}
       />
 
-      <div style={{ display: "flex", background: "#F5F7FB", minHeight: "calc(100vh - 108px)" }}>
-        {/* Phase sidebar — offset right of admin sidebar (240px) and below admin+portal headers (116px) */}
-        {!loading && hasProject && phases.length > 0 && (
-          <PhaseSidebar
-            phases={sidebarPhases}
-            onPhaseClick={handlePhaseClick}
-            leftOffset={240}
-            topOffset={116}
-          />
-        )}
+      <main
+        style={{
+          maxWidth: 1280,
+          margin: "0 auto",
+          padding: "0 32px",
+          background: "var(--portal-bg-page)",
+          minHeight: "calc(100vh - 108px)",
+        }}
+      >
+        {loading ? (
+          <div style={{ display: "flex", justifyContent: "center", paddingTop: "80px" }}>
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+          </div>
+        ) : !hasProject ? (
+          <div style={{ borderRadius: "16px", border: "1px solid var(--portal-line-1)", background: "white", padding: "48px 32px", textAlign: "center", marginTop: "32px" }}>
+            <p style={{ fontSize: "32px" }}>📋</p>
+            <p style={{ marginTop: "12px", fontSize: "15px", fontWeight: 600, color: "var(--portal-fg-1)" }}>
+              Este cliente no tiene proyecto asignado
+            </p>
+            <p style={{ marginTop: "4px", fontSize: "13px", color: "var(--portal-fg-5)" }}>
+              Usa "Recrear proyecto" en el menú ⋮ para asignar un template.
+            </p>
+          </div>
+        ) : phases.length === 0 ? (
+          <div style={{ borderRadius: "16px", border: "1px solid var(--portal-line-1)", background: "white", padding: "48px 32px", textAlign: "center", marginTop: "32px" }}>
+            <p style={{ fontSize: "13px", color: "var(--portal-fg-5)" }}>
+              No hay fases configuradas en el proyecto de este cliente.
+            </p>
+          </div>
+        ) : (
+          <>
+            {/* Admin banner */}
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 14px", margin: "16px 0 0", background: "#EEF2FF", borderRadius: "8px", border: "1px solid #C7D2FE" }}>
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <circle cx="7" cy="7" r="6" stroke="#4F46E5" strokeWidth="1.3" />
+                <path d="M7 6v4M7 4.5v.5" stroke="#4F46E5" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              <span style={{ fontSize: "12px", color: "#4F46E5", fontWeight: 500 }}>
+                Vista de administrador — haz clic en cualquier tarea para validarla o marcarla. Usa "Agregar tarea" en la barra superior.
+              </span>
+            </div>
 
-        {/* Main content */}
-        <main
-          className="flex-1 min-[900px]:ml-[180px]"
-          style={{ padding: "24px 32px" }}
-        >
-          {loading ? (
-            <div style={{ display: "flex", justifyContent: "center", paddingTop: "64px" }}>
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-            </div>
-          ) : !hasProject ? (
-            <div
-              style={{
-                borderRadius: "16px",
-                border: "1px solid #E2E8F0",
-                background: "white",
-                padding: "48px 32px",
-                textAlign: "center",
-              }}
-            >
-              <p style={{ fontSize: "32px" }}>📋</p>
-              <p style={{ marginTop: "12px", fontSize: "15px", fontWeight: 600, color: "#0F1629" }}>
-                Este cliente no tiene proyecto asignado
-              </p>
-              <p style={{ marginTop: "4px", fontSize: "13px", color: "#94A3B8" }}>
-                Invita de nuevo al cliente con un proyecto para usar el Portal de Status.
-              </p>
-            </div>
-          ) : phases.length === 0 ? (
-            <div
-              style={{
-                borderRadius: "16px",
-                border: "1px solid #E2E8F0",
-                background: "white",
-                padding: "48px 32px",
-                textAlign: "center",
-              }}
-            >
-              <p style={{ fontSize: "13px", color: "#94A3B8" }}>
-                No hay fases configuradas en el proyecto de este cliente.
-              </p>
-            </div>
-          ) : (
-            <>
-              {/* Admin info banner */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  padding: "8px 14px",
-                  marginBottom: "16px",
-                  background: "#EEF2FF",
-                  borderRadius: "8px",
-                  border: "1px solid #C7D2FE",
-                }}
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <circle cx="7" cy="7" r="6" stroke="#4F46E5" strokeWidth="1.3" />
-                  <path d="M7 6v4M7 4.5v.5" stroke="#4F46E5" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-                <span style={{ fontSize: "12px", color: "#4F46E5", fontWeight: 500 }}>
-                  Vista de administrador — edita nombres, fechas, propietarios, fases y preguntas. Haz clic en cualquier texto para editarlo.
-                </span>
+            <div className="portal-layout">
+              {/* Col 1: Phase Rail */}
+              <div ref={railContainerRef}>
+                <PhaseRail
+                  phases={railPhases}
+                  activePhaseId={activePhaseId ?? ""}
+                  onPhaseClick={setActivePhaseId}
+                  onAnchorsChange={handleAnchorsChange}
+                />
               </div>
 
-              {/* Phase cards */}
-              {phases.map((phase, i) => {
-                const phaseProgress = calcPhaseProgress(phase.tasks);
-                return (
-                  <div
-                    key={phase.id}
-                    ref={(el) => { if (el) phaseRefs.current.set(phase.id, el); }}
-                    style={{ scrollMarginTop: "120px" }}
-                  >
-                    <PhaseCard
-                      phase={phase}
-                      tasks={phase.tasks}
-                      defaultOpen={i === 0}
-                      progress={phaseProgress}
-                      onTaskClick={(task) =>
-                        setSelectedTask(task as ClientTask & { validation?: TaskValidation })
-                      }
-                      isAdmin={true}
-                      onCheckboxClick={handleCheckboxClick}
-                      onAddTask={(phaseId) => setAddTaskPhaseId(phaseId)}
-                      onDueDateChange={handleDueDateChange}
-                      onOwnerLabelChange={handleOwnerLabelChange}
-                      onNameChange={handleNameChange}
-                      onDeleteTask={handleDeleteTask}
-                      onOwnerTypeChange={handleOwnerTypeChange}
-                      onPhaseNameChange={handlePhaseNameChange}
-                      phaseFiles={phase.files}
+              {/* Col 2: Panda Track */}
+              <div className="hidden min-[900px]:block">
+                <PandaTrack
+                  phases={trackPhases}
+                  phaseAnchors={phaseAnchors}
+                  containerHeight={railHeight}
+                />
+              </div>
+
+              {/* Col 3: Phase Detail */}
+              {activePhase && (
+                <PhaseDetail
+                  phase={{
+                    id: activePhase.id,
+                    phase_number: activePhase.phase_number,
+                    name: activePhase.name,
+                    progress: activePhaseProgress,
+                    totalPhases: phases.length,
+                    completedTaskCount,
+                    totalTaskCount,
+                    lastUpdated,
+                  }}
+                  company={clientProfile?.company_name ?? null}
+                  projectCreatedAt={null}
+                  isAdmin={true}
+                  vambeTasks={activePhase.tasks.filter((t) => t.owner_type === "vambe")}
+                  clientTasks={activePhase.tasks.filter((t) => t.owner_type === "client")}
+                  onTaskClick={handleAdminTaskClick}
+                  onPhaseFilesRender={() => (
+                    <PhaseFiles
+                      phaseId={activePhase.id}
                       clientId={clientId}
+                      initialFiles={activePhase.files}
                     />
-                  </div>
-                );
-              })}
-            </>
-          )}
-        </main>
-      </div>
+                  )}
+                  onContinueClick={null}
+                  continueLabel={null}
+                />
+              )}
+            </div>
+          </>
+        )}
+      </main>
 
       {/* Panels */}
       {selectedTask?.task_type === "info_request" && (
