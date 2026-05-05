@@ -50,6 +50,7 @@ export default function PortalPage() {
 
   const [phases, setPhases] = useState<PhaseWithTasks[]>([]);
   const [projectCreatedAt, setProjectCreatedAt] = useState<string | null>(null);
+  const [engineerWhatsapp, setEngineerWhatsapp] = useState<string | null>(null);
   const [hasProject, setHasProject] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [activePhaseId, setActivePhaseId] = useState<string | null>(null);
@@ -102,6 +103,24 @@ export default function PortalPage() {
 
       setHasProject(true);
       setProjectCreatedAt(project.created_at ?? null);
+
+      // Fetch assigned engineer's WhatsApp (project_members with role = 'admin')
+      const { data: adminMember } = await supabase
+        .from("project_members")
+        .select("user_id")
+        .eq("project_id", project.id)
+        .eq("role", "admin")
+        .limit(1)
+        .maybeSingle();
+
+      if (adminMember?.user_id) {
+        const { data: adminProfile } = await supabase
+          .from("profiles")
+          .select("whatsapp_number")
+          .eq("id", adminMember.user_id)
+          .maybeSingle();
+        setEngineerWhatsapp(adminProfile?.whatsapp_number ?? null);
+      }
 
       const { data: phasesData } = await supabase
         .from("client_phases")
@@ -275,7 +294,7 @@ export default function PortalPage() {
           minHeight: "calc(100vh - 68px)",
         }}
       >
-        <PortalHero />
+        <PortalHero engineerWhatsapp={engineerWhatsapp} />
 
         {loading ? (
           <div

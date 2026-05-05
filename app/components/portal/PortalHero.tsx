@@ -1,16 +1,13 @@
 "use client";
 
 interface PortalHeroProps {
-  onContactAdmin?: () => void;
+  engineerWhatsapp?: string | null;
 }
 
-export default function PortalHero({ onContactAdmin }: PortalHeroProps) {
+export default function PortalHero({ engineerWhatsapp }: PortalHeroProps) {
   const handleContact = () => {
-    if (onContactAdmin) {
-      onContactAdmin();
-    } else {
-      window.location.href = "mailto:tomas.hanna@vambe.ai";
-    }
+    const number = engineerWhatsapp?.replace(/[^0-9]/g, "") ?? "56912345678";
+    window.open(`https://wa.me/${number}`, "_blank");
   };
 
   return (
@@ -72,7 +69,7 @@ export default function PortalHero({ onContactAdmin }: PortalHeroProps) {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         </svg>
-        Hablar con tu admin
+        Hablar con tu ingeniero
       </button>
     </div>
   );
