@@ -744,7 +744,17 @@ export default function AdminClientsPage() {
                               </div>
                             </div>
                           </td>
-                          <td colSpan={3} />
+                            <td colSpan={2} />
+                          {/* Last activity per member */}
+                          <td style={{ padding: "10px 20px", whiteSpace: "nowrap" }}>
+                            {member.last_activity_at ? (
+                              <span style={{ fontSize: 11.5, color: daysAgo(member.last_activity_at) >= 14 ? "#4F46E5" : "#6B7280", fontWeight: daysAgo(member.last_activity_at) >= 14 ? 600 : 400 }}>
+                                {relativeTime(member.last_activity_at)}
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: 11.5, color: "#D1D5DB" }}>Sin actividad</span>
+                            )}
+                          </td>
                           <td style={{ padding: "10px 20px", textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
                             <Link
                               href={`/dashboard/admin/clients/${member.id}`}
