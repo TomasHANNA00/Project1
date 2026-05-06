@@ -122,96 +122,96 @@ export default function AdminClientDetailPage() {
   }, [showSettingsMenu]);
 
   const loadClientProfile = useCallback(async () => {
-    const { data } = await supabase
-      .from("profiles")
-      .select("full_name, company_name")
-      .eq("id", clientId)
-      .single();
-    if (data) setClientProfile(data);
+    try {
+      const { data } = await supabase
+        .from("profiles")
+        .select("full_name, company_name")
+        .eq("id", clientId)
+        .single();
+      if (data) setClientProfile(data);
+    } catch (err) {
+      console.error("[admin client detail] loadClientProfile error:", err);
+    }
   }, [clientId]);
 
   const load = useCallback(async () => {
     setLoading(true);
+    try {
+      // Check project_members first (for member users who don't own the project via client_id)
+      const { data: membership } = await supabase
+        .from("project_members")
+        .select("project_id")
+        .eq("user_id", clientId)
+        .limit(1)
+        .maybeSingle();
 
-    // Check project_members first (for member users who don't own the project via client_id)
-    const { data: membership } = await supabase
-      .from("project_members")
-      .select("project_id")
-      .eq("user_id", clientId)
-      .limit(1)
-      .maybeSingle();
+      const { data: project } = membership?.project_id
+        ? await supabase.from("client_projects").select("*").eq("id", membership.project_id).maybeSingle()
+        : await supabase.from("client_projects").select("*").eq("client_id", clientId).maybeSingle();
 
-    const { data: project } = membership?.project_id
-      ? await supabase.from("client_projects").select("*").eq("id", membership.project_id).maybeSingle()
-      : await supabase.from("client_projects").select("*").eq("client_id", clientId).maybeSingle();
+      if (!project) {
+        setHasProject(false);
+        setCurrentProjectId(null);
+        return;
+      }
 
-    if (!project) {
-      setHasProject(false);
-      setCurrentProjectId(null);
-      setLoading(false);
-      return;
-    }
+      setHasProject(true);
+      setCurrentProjectId(project.id);
 
-    setHasProject(true);
-    setCurrentProjectId(project.id);
-
-    const { data: phasesData } = await supabase
-      .from("client_phases")
-      .select("*")
-      .eq("project_id", project.id)
-      .order("phase_number");
-
-    if (!phasesData || phasesData.length === 0) {
-      setPhases([]);
-      setLoading(false);
-      return;
-    }
-
-    const phaseIds = phasesData.map((p) => p.id);
-
-    const { data: tasksData } = await supabase
-      .from("client_tasks")
-      .select("*")
-      .in("phase_id", phaseIds)
-      .order("sort_order");
-
-    const tasks = tasksData ?? [];
-    const taskIds = tasks.map((t) => t.id);
-
-    let validationMap = new Map<string, TaskValidation>();
-    if (taskIds.length > 0) {
-      const { data: validationsData } = await supabase
-        .from("task_validations")
+      const { data: phasesData } = await supabase
+        .from("client_phases")
         .select("*")
-        .in("task_id", taskIds);
-      validationMap = new Map(
-        (validationsData ?? []).map((v) => [v.task_id, v])
-      );
+        .eq("project_id", project.id)
+        .order("phase_number");
+
+      if (!phasesData || phasesData.length === 0) {
+        setPhases([]);
+        return;
+      }
+
+      const phaseIds = phasesData.map((p) => p.id);
+
+      const [{ data: tasksData }, { data: phaseFilesData }] = await Promise.all([
+        supabase.from("client_tasks").select("*").in("phase_id", phaseIds).order("sort_order"),
+        supabase.from("phase_files").select("*").in("phase_id", phaseIds),
+      ]);
+
+      const tasks = tasksData ?? [];
+      const taskIds = tasks.map((t) => t.id);
+
+      let validationMap = new Map<string, TaskValidation>();
+      if (taskIds.length > 0) {
+        const { data: validationsData } = await supabase
+          .from("task_validations")
+          .select("*")
+          .in("task_id", taskIds);
+        validationMap = new Map(
+          (validationsData ?? []).map((v) => [v.task_id, v])
+        );
+      }
+
+      const phaseFilesMap = new Map<string, PhaseFile[]>();
+      for (const f of phaseFilesData ?? []) {
+        if (!phaseFilesMap.has(f.phase_id)) phaseFilesMap.set(f.phase_id, []);
+        phaseFilesMap.get(f.phase_id)!.push(f as PhaseFile);
+      }
+
+      const assembled: PhaseWithTasks[] = phasesData.map((phase) => ({
+        ...phase,
+        files: phaseFilesMap.get(phase.id) ?? [],
+        tasks: tasks
+          .filter((t) => t.phase_id === phase.id)
+          .map((t) => ({ ...t, validation: validationMap.get(t.id) })),
+      }));
+
+      setPhases(assembled);
+      const firstPending = assembled.find((p) => calcPhaseProgress(p.tasks) < 100);
+      setActivePhaseId((firstPending ?? assembled[assembled.length - 1])?.id ?? null);
+    } catch (err) {
+      console.error("[admin client detail] load error:", err);
+    } finally {
+      setLoading(false);
     }
-
-    const { data: phaseFilesData } = await supabase
-      .from("phase_files")
-      .select("*")
-      .in("phase_id", phaseIds);
-
-    const phaseFilesMap = new Map<string, PhaseFile[]>();
-    for (const f of phaseFilesData ?? []) {
-      if (!phaseFilesMap.has(f.phase_id)) phaseFilesMap.set(f.phase_id, []);
-      phaseFilesMap.get(f.phase_id)!.push(f as PhaseFile);
-    }
-
-    const assembled: PhaseWithTasks[] = phasesData.map((phase) => ({
-      ...phase,
-      files: phaseFilesMap.get(phase.id) ?? [],
-      tasks: tasks
-        .filter((t) => t.phase_id === phase.id)
-        .map((t) => ({ ...t, validation: validationMap.get(t.id) })),
-    }));
-
-    setPhases(assembled);
-    const firstPending = assembled.find((p) => calcPhaseProgress(p.tasks) < 100);
-    setActivePhaseId((firstPending ?? assembled[assembled.length - 1])?.id ?? null);
-    setLoading(false);
   }, [clientId]);
 
   useEffect(() => {
