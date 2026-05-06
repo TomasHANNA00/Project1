@@ -86,6 +86,7 @@ export default function AdminClientDetailPage() {
     created_at: string;
     full_name: string | null;
     company_name: string | null;
+    email: string | null;
   }>>([]);
   const [membersLoading, setMembersLoading] = useState(false);
   const [addMemberEmail, setAddMemberEmail] = useState("");
@@ -334,18 +335,30 @@ export default function AdminClientDetailPage() {
   const loadMembers = useCallback(async () => {
     if (!currentProjectId) return;
     setMembersLoading(true);
-    const { data } = await supabase
+    const { data: memberRows } = await supabase
       .from("project_members")
-      .select("user_id, role, created_at, profiles(full_name, company_name)")
+      .select("user_id, role, created_at")
       .eq("project_id", currentProjectId)
       .order("created_at");
+
+    const userIds = (memberRows ?? []).map((m) => m.user_id);
+    const profileMap = new Map<string, { full_name: string | null; company_name: string | null; email: string | null }>();
+    if (userIds.length > 0) {
+      const { data: profileRows } = await supabase
+        .from("profiles")
+        .select("id, full_name, company_name, email")
+        .in("id", userIds);
+      for (const p of profileRows ?? []) {
+        profileMap.set(p.id, { full_name: p.full_name ?? null, company_name: p.company_name ?? null, email: p.email ?? null });
+      }
+    }
+
     setMembers(
-      (data ?? []).map((m: any) => ({
+      (memberRows ?? []).map((m) => ({
         user_id: m.user_id,
         role: m.role,
         created_at: m.created_at,
-        full_name: (m.profiles as any)?.full_name ?? null,
-        company_name: (m.profiles as any)?.company_name ?? null,
+        ...(profileMap.get(m.user_id) ?? { full_name: null, company_name: null, email: null }),
       }))
     );
     setMembersLoading(false);
@@ -1466,6 +1479,11 @@ export default function AdminClientDetailPage() {
                         <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F1629" }}>
                           {m.full_name ?? "Sin nombre"}
                         </div>
+                        {m.email && (
+                          <div style={{ fontSize: "11px", color: "#64748B", marginTop: "1px" }}>
+                            {m.email}
+                          </div>
+                        )}
                         {m.company_name && (
                           <div style={{ fontSize: "11px", color: "#94A3B8", marginTop: "1px" }}>
                             {m.company_name}

@@ -163,7 +163,7 @@ export default function PhaseDetail({
               textTransform: "uppercase",
               letterSpacing: "0.12em",
             }}>
-              VAMBE ESTÁ TRABAJANDO EN
+              REVISARLO JUNTO CON EL EQUIPO DE VAMBE
             </span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>

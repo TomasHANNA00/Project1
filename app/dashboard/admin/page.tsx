@@ -143,11 +143,6 @@ export default function AdminClientsPage() {
     setLoading(true);
     setError(null);
 
-    const timeout = setTimeout(() => {
-      setLoading(false);
-      setError("La carga tardó demasiado. Intenta de nuevo.");
-    }, 6000);
-
     try {
       const { data: profilesData, error: profilesErr } = await supabase
         .from("profiles")
@@ -302,7 +297,6 @@ export default function AdminClientsPage() {
     } catch {
       setError("Error al cargar los clientes.");
     } finally {
-      clearTimeout(timeout);
       setLoading(false);
     }
   };

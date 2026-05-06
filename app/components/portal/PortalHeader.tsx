@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useAuth } from "@/app/contexts/AuthContext";
 
 interface PortalHeaderProps {
@@ -9,8 +10,9 @@ interface PortalHeaderProps {
 }
 
 export default function PortalHeader({ companyName, totalProgress }: PortalHeaderProps) {
-  const { signOut } = useAuth();
+  const { signOut, profile } = useAuth();
   const isDone = totalProgress >= 100;
+  const logoHref = profile?.role === "admin" ? "/dashboard/admin" : "/dashboard/portal";
 
   return (
     <header
@@ -32,14 +34,16 @@ export default function PortalHeader({ companyName, totalProgress }: PortalHeade
         }}
       >
         {/* Left: Logo */}
-        <Image
-          src="/logo-vambe.png"
-          alt="Vambe"
-          height={44}
-          width={140}
-          style={{ width: "auto", height: "44px", display: "block" }}
-          priority
-        />
+        <Link href={logoHref} style={{ display: "block", lineHeight: 0 }}>
+          <Image
+            src="/logo-vambe.png"
+            alt="Vambe"
+            height={44}
+            width={140}
+            style={{ width: "auto", height: "44px", display: "block" }}
+            priority
+          />
+        </Link>
 
         {/* Right: Company badge + progress + sign out */}
         <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
