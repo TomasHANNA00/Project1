@@ -8,21 +8,37 @@ export default function AuthCallbackPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // Supabase detects the ?code= param from the OAuth redirect and exchanges
-    // it for a session automatically (detectSessionInUrl: true).
-    // We just wait for the auth state to settle then forward to dashboard.
+    const handleSession = async (session: { user: { id: string; email?: string } }) => {
+      const res = await fetch("/api/auth/verify-oauth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: session.user.id,
+          email: session.user.email,
+        }),
+      });
+      const { allowed } = await res.json();
+
+      if (!allowed) {
+        await supabase.auth.signOut();
+        router.replace("/login?error=no_account");
+        return;
+      }
+
+      router.replace("/dashboard");
+    };
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_IN" && session) {
         subscription.unsubscribe();
-        router.replace("/dashboard");
+        handleSession(session);
       }
     });
 
-    // Safety: if already signed in when this page loads, redirect immediately.
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         subscription.unsubscribe();
-        router.replace("/dashboard");
+        handleSession(session);
       }
     });
 

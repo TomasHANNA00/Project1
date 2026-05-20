@@ -15,6 +15,7 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const resetSuccess = searchParams.get("reset") === "success";
+  const noAccount = searchParams.get("error") === "no_account";
 
   useEffect(() => {
     if (!authLoading && user) {
@@ -71,6 +72,11 @@ function LoginForm() {
         {resetSuccess && (
           <div className="mb-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
             Contraseña actualizada. Puedes iniciar sesión.
+          </div>
+        )}
+        {noAccount && (
+          <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+            No tienes una cuenta activa. Contacta a tu administrador para recibir una invitación.
           </div>
         )}
 
