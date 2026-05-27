@@ -67,11 +67,13 @@ export default function InfoRequestPanel({ task, onClose, onSaved, isAdmin, clie
     if (qs.length > 0) {
       const qIds = qs.map((q) => q.id);
 
-      const { data: responsesData } = await supabase
+      let responsesQuery = supabase
         .from("task_responses")
         .select("*")
-        .in("question_id", qIds)
-        .eq("client_id", effectiveClientId);
+        .in("question_id", qIds);
+      if (!isAdmin) responsesQuery = responsesQuery.eq("client_id", effectiveClientId);
+
+      const { data: responsesData } = await responsesQuery;
 
       const rMap = new Map((responsesData ?? []).map((r) => [r.question_id, r]));
       setExistingResponses(rMap);
@@ -81,11 +83,13 @@ export default function InfoRequestPanel({ task, onClose, onSaved, isAdmin, clie
       }
       setResponses(rText);
 
-      const { data: filesData } = await supabase
+      let filesQuery = supabase
         .from("task_files")
         .select("*")
-        .in("question_id", qIds)
-        .eq("client_id", effectiveClientId);
+        .in("question_id", qIds);
+      if (!isAdmin) filesQuery = filesQuery.eq("client_id", effectiveClientId);
+
+      const { data: filesData } = await filesQuery;
 
       const fMap: Record<string, TaskFile[]> = {};
       for (const f of filesData ?? []) {
